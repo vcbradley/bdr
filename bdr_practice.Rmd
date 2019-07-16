@@ -1,0 +1,153 @@
+---
+title: "Bayesian DB Practice"
+output: html_notebook
+---
+
+
+```{r}
+rm(list = ls())
+library(data.table)
+library(foreign)
+library(kernlab)
+library(MASS)  # for mvrnorm
+library(ggplot2)
+library(gridExtra)
+setwd('~/github/bdr/')
+```
+
+
+## Data
+September 2018 Pew Research survey https://www.people-press.org/dataset/september-2018-political-survey/
+
+```{r}
+data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T))
+data_sept18
+```
+
+#### Recode survey responses
+```{r}
+## support 
+data_sept18[, .N, .(q7, q8)]
+data_sept18[, qsupport := NULL]
+data_sept18[q7 == "Democratic Party's candidate" | q8 == "Democratic Party's candidate", qsupport := '1-D']
+data_sept18[q7 == "Republican Party's candidate" | q8 == "Republican Party's candidate", qsupport := '2-R']
+data_sept18[q8 == "(VOL) Other", qsupport := '3-O']
+data_sept18[is.na(qsupport), qsupport := '4-DK/R']
+
+data_sept18[, .N, qsupport]
+```
+
+```{r}
+data_sept18[data_sept18[, y_dem := mean(qsupport == '1-D'), by = sstate], y_dem := i.y_dem, on = 'sstate']
+data_sept18[data_sept18[, y_rep := mean(qsupport == '2-R'), by = sstate], y_rep := i.y_rep, on = 'sstate']
+data_sept18[data_sept18[, y_other := mean(qsupport == '3-O'), by = sstate], y_other := i.y_other, on = 'sstate']
+data_sept18[data_sept18[, y_dkr := mean(qsupport == '4-DK/R'), by = sstate], y_dkr := i.y_dkr, on = 'sstate']
+
+data_sept18[, .(sstate, y_dem, y_rep, y_other, y_dkr)]
+##
+names(data_sept18)
+
+data_sept18[, .N, sex]
+data_sept18[, .N, age]
+data_sept18[, .N, sstate]
+```
+
+
+```{r}
+data_state = data_sept18[, .(y_dem = mean(qsupport == '1-D')
+                             , age_under30 = mean(as.numeric(age) < 30)
+                             , race_W = mean(racecmb == 'White'))
+                         , by = sstate]
+plot(y_dem ~ race_W
+  ,data = data_state
+)
+```
+
+## Basic Gaussian process
+
+A Gaussian process is a collection of random variables, any finite subset of which follows a multivariate normal distribution
+
+*prior*: $f \sim \mathcal{GP}(\mathbf{0}, k(x, x'))$
+
+We fix a finite set of $d$ points $\mathbf{s} = (s_1, \dots, s_d)$ in order to draw from the GP as a multivariate normal. Conditioning on $s$, this becomes $\mathbf{f} \sim \mathcal{N}(\mathbf{0}_d, \Sigma_d)$ where $\Sigma_d$ is the epirical covariance matrix of our points $s$.
+
+*posterior*: 
+
+
+```{r}
+# define function to calculate empirical covariance matrix based on Gaussian kernel with length-scale l
+calcSigma = function(x1, x2, l = 1){
+  Sigma = matrix(nrow = length(x1), ncol = length(x2))
+  
+  for(i in 1:length(x1)){
+    for(j in 1:length(x2)){
+      Sigma[i,j] = exp(-1/2 * ((x1[i] - x2[j])/l)^2)
+    }
+  }
+  return(Sigma)
+}
+
+# define the points that we want to fix for the function draw
+s = seq(-5, 5, by = 0.1)
+
+
+Sigma = calcSigma(s, s)
+
+x_prior = t(mvrnorm(n = 5, mu = rep(0, length(s)), Sigma = Sigma))
+x_draws = data.frame(cbind(s, x_prior))
+x_draws = melt(x_draws, id = 's', value.name = 'f(x)')
+
+plot_gp_prior = ggplot(x_draws, aes(x = s, y = `f(x)`, color = variable)) + geom_line() +
+  ggtitle("Draws from GP Prior") + theme_minimal()
+
+
+x_obs = c(-4, -2.5, -1, 0, 4)
+y_obs = c(-2, 0, 1, 2, -1)
+
+
+K_xx = calcSigma(x_obs, x_obs)
+K_xstarx = calcSigma(s, x_obs)
+K_xxstar = calcSigma(x_obs, s)
+K_xstarxstar = calcSigma(s, s)
+
+mu = K_xstarx %*% solve(K_xx) %*% y_obs
+Sigma_star = K_xstarxstar - K_xstarx %*% solve(K_xx) %*% K_xxstar
+
+x_post = t(mvrnorm(5, mu = mu, Sigma = Sigma_star))
+x_post = data.frame(cbind(s, x_post))
+x_post = melt(x_post, id = 's', value.name = 'f_star')
+
+f_star_covar = data.frame(cbind(s, ub = mu + 2 * sqrt(diag(Sigma_star)), lb = mu - 2 * sqrt(diag(Sigma_star))))
+
+plot_gp_post = ggplot() + 
+  geom_ribbon(data = f_star_covar, aes(x = s, ymin = V3, ymax = V2), fill = "grey", alpha = 0.5) +
+  geom_line(data = x_post, aes(x = s, y = f_star, color = variable)) +
+  #geom_point(aes(x = x_obs, y = y_obs)) +
+  ggtitle("Draws from GP Posterior") +
+  theme_minimal()
+  
+  
+
+
+grid.arrange(plot_gp_prior, plot_gp_post, nrow = 1)
+```
+
+
+## Explore Kernels from `kernlab` package
+
+```{r}
+## create a RBF kernel function with sigma hyper-parameter 0.05
+rbf = rbfdot(sigma = 1)
+
+## create artificial data set
+x <- matrix(rnorm(60), 6, 10)
+
+## compute kernel matrix
+kx <- kernelMatrix(rbf, x)  ## k_12 is equivalent to exp(- sum((x[1,] - x[2,])^2))
+```
+
+
+```{r}
+
+```
+
