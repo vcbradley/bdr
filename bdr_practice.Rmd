@@ -12,19 +12,129 @@ library(kernlab)
 library(MASS)  # for mvrnorm
 library(ggplot2)
 library(gridExtra)
+library(glmnet)
 setwd('~/github/bdr/')
 ```
 
+## Overview
+
+Bayesian distribution regression (BDR) is built on a few pieces of theory:
+
+1. Kernel mean embeddings
+2. Gaussian process regression (as the prior for the kernel mean embeddings)
+3. Landmark points for dimensionality reduction (advantages of this over FastFood? both are reducing the dimensionality of the feature embedding so that we can calualate the empirical mean)
+
+This notebook builds the theory of Bayesian Distribution Regression piece by piece:
+
+1. Explore kernels from the `kernlab` package.  We'll later use the functions from this package to calculate mean embeddings for bags of observations $\{x_j^i\}_{j=1}^{N_i}$.
+2. 
+
+
+## Explore Kernels from `kernlab` package
+
+```{r}
+## create a RBF kernel function with sigma hyper-parameter 0.05
+rbf = rbfdot(sigma = 1)
+
+## create artificial data set
+x <- matrix(rnorm(60), 6, 10)
+
+## compute kernel matrix
+kx <- kernelMatrix(rbf, x)  ## k_12 is equivalent to exp(- sum((x[1,] - x[2,])^2))
+```
+
+
+## Basic Gaussian process
+
+A Gaussian process is a collection of random variables, any finite subset of which follows a multivariate normal distribution
+
+*prior*: $f \sim \mathcal{GP}(\mathbf{0}, k(x, x'))$
+
+We fix a finite set of $d$ points $\mathbf{s} = (s_1, \dots, s_d)$ in order to draw from the GP as a multivariate normal. Conditioning on $s$, this becomes $\mathbf{f} \sim \mathcal{N}(\mathbf{0}_d, \Sigma_d)$ where $\Sigma_d$ is the empirical covariance matrix of our points $s$.
+
+We then ``observe" 5 points $\{x_i, y_i\}_{i = 1}^n$.  We assume that y is observed without noise such that $y = f(x)$.  In order to predict at a new point $x_\star$, we condiditon on the observed points $X$ and their associated outcomes $Y$, and arrive at the closed-form posterior predictive distribution of $f_\star$
+
+*posterior*: $f_\star | x_\star, X, \mathbf{y} \sim \mathcal{N}(k_\star K^{-1}\mathbf{y}, k_{\star\star} - k_\star K^{-1}k_\star^T)$
+
+where $K_{ij} = k(x_i, x_j)$ and $k_\star = [k(x_1, x_\star), \dots, k(x_n, x_\star)]$ and $k_{\star\star} = k(x_star, x_star)$
+
+```{r}
+# define function to calculate empirical covariance matrix based on Gaussian kernel with length-scale l
+calcSigma = function(x1, x2, l = 1){
+  Sigma = matrix(nrow = length(x1), ncol = length(x2))
+  
+  for(i in 1:length(x1)){
+    for(j in 1:length(x2)){
+      Sigma[i,j] = exp(-1/2 * ((x1[i] - x2[j])/l)^2)
+    }
+  }
+  return(Sigma)
+}
+
+# define the points that we want to fix for the function draw
+s = seq(-5, 5, by = 0.1)
+
+# calculate the empirical covariance of the points (basically 0)
+Sigma = calcSigma(s, s)
+
+# draw 5 samples from the GP prior at the fixed points
+x_prior = t(mvrnorm(n = 5, mu = rep(0, length(s)), Sigma = Sigma))
+x_draws = data.frame(cbind(s, x_prior))
+x_draws = melt(x_draws, id = 's', value.name = 'f(x)')
+
+# plot draws from the prior
+plot_gp_prior = ggplot(x_draws, aes(x = s, y = `f(x)`, color = variable)) + geom_line() +
+  ggtitle("Draws from GP Prior") + theme_minimal()
+
+# specify points that we observe
+x_obs = c(-4, -2.5, -1, 0, 4)
+y_obs = c(-2, 0, 1, 2, -1)
+
+# calculate kernel matricies needed for posterior evaluation
+K_xx = calcSigma(x_obs, x_obs)
+K_xstarx = calcSigma(s, x_obs)
+K_xxstar = calcSigma(x_obs, s)
+K_xstarxstar = calcSigma(s, s)
+
+# calculate posterior mean and variance
+mu = K_xstarx %*% solve(K_xx) %*% y_obs
+Sigma_star = K_xstarxstar - K_xstarx %*% solve(K_xx) %*% K_xxstar
+
+# draw 5 samples from the posterior at fixed eval points s
+x_post = t(mvrnorm(5, mu = mu, Sigma = Sigma_star))
+x_post = data.frame(cbind(s, x_post))
+x_post = melt(x_post, id = 's', value.name = 'f_star')
+
+# calculate 95% confidence bands for posterior
+f_star_covar = data.frame(cbind(s, ub = mu + 2 * sqrt(diag(Sigma_star)), lb = mu - 2 * sqrt(diag(Sigma_star))))
+
+# plot draws from posterior
+plot_gp_post = ggplot() + 
+  geom_ribbon(data = f_star_covar, aes(x = s, ymin = V3, ymax = V2), fill = "grey", alpha = 0.5) +
+  geom_line(data = x_post, aes(x = s, y = f_star, color = variable)) +
+  #geom_point(aes(x = x_obs, y = y_obs)) +
+  ggtitle("Draws from GP Posterior") +
+  theme_minimal()
+  
+grid.arrange(plot_gp_prior, plot_gp_post, nrow = 1)
+```
+
+
+
 
 ## Data
-September 2018 Pew Research survey https://www.people-press.org/dataset/september-2018-political-survey/
 
 ```{r}
 data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T))
 data_sept18
 ```
 
+Individual-level survey responses (n = `nrow(data_sept18`) from September 2018 Pew Research survey (https://www.people-press.org/dataset/september-2018-political-survey/).
+
+
+
 #### Recode survey responses
+Recode the survey responses 
 ```{r}
 ## support 
 data_sept18[, .N, .(q7, q8)]
@@ -63,91 +173,56 @@ plot(y_dem ~ race_W
 )
 ```
 
-## Basic Gaussian process
 
-A Gaussian process is a collection of random variables, any finite subset of which follows a multivariate normal distribution
 
-*prior*: $f \sim \mathcal{GP}(\mathbf{0}, k(x, x'))$
+## Mean embeddings
 
-We fix a finite set of $d$ points $\mathbf{s} = (s_1, \dots, s_d)$ in order to draw from the GP as a multivariate normal. Conditioning on $s$, this becomes $\mathbf{f} \sim \mathcal{N}(\mathbf{0}_d, \Sigma_d)$ where $\Sigma_d$ is the epirical covariance matrix of our points $s$.
+We observe bags of points $\{x_j^i\}_{j = 1}^{N_i}$ from $i = 1, \dots, n$, where $x_j^i \in \mathbb{R}^p$.  We have to embed the $x_j^i$ in feature space and then take the mean.  This means we can't use the kernel trick which would take us directly from $\mathbb{R}^p \times \mathbb{R}^p \to \mathbb{R}$.  In order to calculate the coordinate of each observation in feature space, we convert each point to an *explicit* featurization:  $x_j^i \in \mathbb{R}$ is mapped to $$\phi(x_j^i) = [k(x_j^i, u_1), \dots, k(x_j^i, u_d)]^T \in \mathbb{R}^d$$
+where $\mathbf{u} = \{u_l\}_{l = 1}^d$ are a set of landmark points.  For now we'll set $d = 100$ and choose $u_l$ using k-means clustering.
 
-*posterior*: 
 
 
 ```{r}
-# define function to calculate empirical covariance matrix based on Gaussian kernel with length-scale l
-calcSigma = function(x1, x2, l = 1){
-  Sigma = matrix(nrow = length(x1), ncol = length(x2))
-  
-  for(i in 1:length(x1)){
-    for(j in 1:length(x2)){
-      Sigma[i,j] = exp(-1/2 * ((x1[i] - x2[j])/l)^2)
-    }
-  }
-  return(Sigma)
-}
+# choose 3 features - age, gender and white
+X = data_sept18[, .(age = as.numeric(age), female = as.numeric(sex == 'Female'), white = as.numeric(racecmb == 'White'))]
+Y = data_sept18[, .(dem_pct = mean(as.numeric(qsupport == '1-D'))), by = sstate]
 
-# define the points that we want to fix for the function draw
-s = seq(-5, 5, by = 0.1)
+c = kmeans(X, centers = 100)
+c$centers
 
+rbf = rbfdot(sigma = 0.5)
 
-Sigma = calcSigma(s, s)
+embeddings = kernelMatrix(rbf, x = as.matrix(X), y = as.matrix(c$centers))
+embeddings = data.table(state = as.character(data_sept18$sstate), embeddings)
+setnames(embeddings, c('state', paste0('k_u', 1:100)))
 
-x_prior = t(mvrnorm(n = 5, mu = rep(0, length(s)), Sigma = Sigma))
-x_draws = data.frame(cbind(s, x_prior))
-x_draws = melt(x_draws, id = 's', value.name = 'f(x)')
+#calculate mean of each state
+embeddings[, mean(k_u10)]
+mu_hat = embeddings[, lapply(.SD, mean), .SDcols = names(embeddings)[2:ncol(embeddings)], by = state][order(state)]
 
-plot_gp_prior = ggplot(x_draws, aes(x = s, y = `f(x)`, color = variable)) + geom_line() +
-  ggtitle("Draws from GP Prior") + theme_minimal()
+fit_lambda = cv.glmnet(x = as.matrix(mu_hat[, -1, with = F]), y = Y$dem_pct, nfolds = 10)
+ind = which(coef(fit_lambda, s = 'lambda.min') != 0)
 
+fit = glmnet(x = as.matrix(mu_hat[, c(ind + 1), with = F]), y = Y$dem_pct)
 
-x_obs = c(-4, -2.5, -1, 0, 4)
-y_obs = c(-2, 0, 1, 2, -1)
+mu_hat_gender = data.table(cbind(embeddings, sex = data_sept18$sex))[, lapply(.SD, mean), .SDcols = names(embeddings)[2:ncol(embeddings)], by = .(state, sex)]
 
+y_hat = predict(fit, newx = as.matrix(mu_hat_gender[, c(ind + 2), with = F]), s= 0)
+y_hat = cbind(mu_hat_gender[,.(state,sex)], y_hat = y_hat)
 
-K_xx = calcSigma(x_obs, x_obs)
-K_xstarx = calcSigma(s, x_obs)
-K_xxstar = calcSigma(x_obs, s)
-K_xstarxstar = calcSigma(s, s)
+y_actual = data_sept18[, .(y_dem = mean(as.numeric(qsupport == '1-D'))), by = .(sstate,sex)]
+setnames(y_actual, c('state', 'sex', 'y_dem'))
+y_hat = merge(y_actual, y_hat, by = c('state','sex'), all = T)
 
-mu = K_xstarx %*% solve(K_xx) %*% y_obs
-Sigma_star = K_xstarxstar - K_xstarx %*% solve(K_xx) %*% K_xxstar
-
-x_post = t(mvrnorm(5, mu = mu, Sigma = Sigma_star))
-x_post = data.frame(cbind(s, x_post))
-x_post = melt(x_post, id = 's', value.name = 'f_star')
-
-f_star_covar = data.frame(cbind(s, ub = mu + 2 * sqrt(diag(Sigma_star)), lb = mu - 2 * sqrt(diag(Sigma_star))))
-
-plot_gp_post = ggplot() + 
-  geom_ribbon(data = f_star_covar, aes(x = s, ymin = V3, ymax = V2), fill = "grey", alpha = 0.5) +
-  geom_line(data = x_post, aes(x = s, y = f_star, color = variable)) +
-  #geom_point(aes(x = x_obs, y = y_obs)) +
-  ggtitle("Draws from GP Posterior") +
-  theme_minimal()
-  
-  
-
-
-grid.arrange(plot_gp_prior, plot_gp_post, nrow = 1)
+plot(y_hat$y_hat.1 ~ y_hat$y_dem, col = y_hat$sex)
 ```
 
 
-## Explore Kernels from `kernlab` package
-
-```{r}
-## create a RBF kernel function with sigma hyper-parameter 0.05
-rbf = rbfdot(sigma = 1)
-
-## create artificial data set
-x <- matrix(rnorm(60), 6, 10)
-
-## compute kernel matrix
-kx <- kernelMatrix(rbf, x)  ## k_12 is equivalent to exp(- sum((x[1,] - x[2,])^2))
-```
 
 
-```{r}
 
-```
+
+
+
+
 
