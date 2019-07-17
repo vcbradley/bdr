@@ -261,7 +261,7 @@ where $\mathbf{u} = \{u_l\}_{l = 1}^d$ are a set of landmark points.  For now we
 Specify landmark points $\mathbf{u} = (u_1, \dots, u_k)$ as the centroids of k-means clustering
 
 ```{r}
-n_centers = 50
+n_centers = 30
 groups = kmeans(X_train[, -1], centers = n_centers)
 u = as.matrix(groups$centers)
 head(u)
@@ -276,8 +276,9 @@ Choose scale parameter $\sigma$ for RBF kernel - use median heuristic for now
 rbf1 = rbfdot(sigma = 1)
 
 K_sigma = kernelMatrix(rbf1, x = as.matrix(X_train[, -1]), y = u)
-dim(K_sigma)
 sigma = median(K_sigma)
+
+ggplot(melt(K_sigma), aes(x = log(value))) + geom_histogram() + geom_vline(xintercept = log(sigma), color = 'red')
 ```
 
 
@@ -323,15 +324,33 @@ phi_x_test = kernelMatrix(rbf, x = as.matrix(X_test[, -1]), y = u)
 phi_x_test = data.table(state = X_test$state, phi_x_test)
 setnames(phi_x_test, c('state', paste0('u', 1:n_centers)))
 
-y_hat = predict(fit, newx = as.matrix(X_test[, ind + 1]), s= 0)
-y_hat = cbind(mu_hat_gender[,.(state,sex)], y_hat = y_hat)
+# predict on new data set of X_test embedded in feature space
+y_hat = predict(fit, newx = as.matrix(phi_x_test[, ind + 1, with = F]), s= 0)  #no regularization
+y_hat = cbind(Y_test, y_hat)
 
-y_actual = data_sept18[, .(y_dem = mean(as.numeric(qsupport == '1-D'))), by = .(sstate,sex)]
-setnames(y_actual, c('state', 'sex', 'y_dem'))
-y_hat = merge(y_actual, y_hat, by = c('state','sex'), all = T)
-
-plot(y_hat$y_hat.1 ~ y_hat$y_dem, col = y_hat$sex)
+# calculate overall classification rate
+class_rates = y_hat[, .(.N
+          , pct_correct = mean((`1` > 0.5 & y_dem == 1) | (`1` <= 0.5 & y_dem == 0))
+          , pct_false_neg = mean(`1` <= 0.5 & y_dem != 0)
+          , pct_false_pos = mean(`1` > 0.5 & y_dem != 1)
+          , mse = mean((y_dem - `1`)^2)
+          )]
+class_rates
 ```
+
+Plot actual percent Dem by decile of the score
+```{r}
+# get deciles of predicted score
+y_hat[, pred_decile := cut(`1`, breaks = quantile(`1`, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
+
+#ggplot(y_hat, aes(x = `1`, color = as.factor(y_dem)), alpha = 0.2) + geom_density()
+
+#plot actual pct of each decile that supports dems
+ggplot(y_hat[, .(pct_y_dem = mean(y_dem)), by = pred_decile], aes(x = pred_decile, y = pct_y_dem)) + 
+  geom_bar(stat = 'identity') +
+  ggtitle("Pct Dem supporter by score decile")
+```
+
 
 
 
