@@ -13,6 +13,7 @@ library(MASS)  # for mvrnorm
 library(ggplot2)
 library(gridExtra)
 library(glmnet)
+library(caret)
 setwd('~/github/bdr/')
 ```
 
@@ -120,12 +121,14 @@ grid.arrange(plot_gp_prior, plot_gp_post, nrow = 1)
 ```
 
 
+## Try out BDR on survey data
 
+*Goal*: Estimate individual-level support using BDR on state-level support outcomes 
 
-## Data
+### Data
 
 ```{r}
-data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T))
+data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T), stringsAsFactors = F)
 data_sept18
 ```
 
@@ -134,7 +137,8 @@ Individual-level survey responses (n = `nrow(data_sept18`) from September 2018 P
 
 
 #### Recode survey responses
-Recode the survey responses 
+
+Recode the survey responses - combine q7 (strong) and q8 (leaners) to get full support response
 ```{r}
 ## support 
 data_sept18[, .N, .(q7, q8)]
@@ -144,36 +148,109 @@ data_sept18[q7 == "Republican Party's candidate" | q8 == "Republican Party's can
 data_sept18[q8 == "(VOL) Other", qsupport := '3-O']
 data_sept18[is.na(qsupport), qsupport := '4-DK/R']
 
-data_sept18[, .N, qsupport]
+data_sept18[, .(.N, pct = .N/nrow(data_sept18)), qsupport][order(qsupport)]
 ```
 
-```{r}
-data_sept18[data_sept18[, y_dem := mean(qsupport == '1-D'), by = sstate], y_dem := i.y_dem, on = 'sstate']
-data_sept18[data_sept18[, y_rep := mean(qsupport == '2-R'), by = sstate], y_rep := i.y_rep, on = 'sstate']
-data_sept18[data_sept18[, y_other := mean(qsupport == '3-O'), by = sstate], y_other := i.y_other, on = 'sstate']
-data_sept18[data_sept18[, y_dkr := mean(qsupport == '4-DK/R'), by = sstate], y_dkr := i.y_dkr, on = 'sstate']
-
-data_sept18[, .(sstate, y_dem, y_rep, y_other, y_dkr)]
-##
-names(data_sept18)
-
-data_sept18[, .N, sex]
-data_sept18[, .N, age]
-data_sept18[, .N, sstate]
-```
-
-
+# calculate percentages by state
 ```{r}
 data_state = data_sept18[, .(y_dem = mean(qsupport == '1-D')
+                             , y_rep = mean(qsupport == '2-R')
+                             , y_other = mean(qsupport == '3-O')
+                             , y_dkr = mean(qsupport == '4-DK/R')
+                             , total_respondents = .N
+                             # sample covariates
                              , age_under30 = mean(as.numeric(age) < 30)
-                             , race_W = mean(racecmb == 'White'))
-                         , by = sstate]
+                             , race_W = mean(racecmb == 'White')
+                             ), by = sstate][order(sstate)]
+
+head(data_state)
+```
+
+# Check relationshhip between dem vote and % white by state
+```{r}
 plot(y_dem ~ race_W
-  ,data = data_state
+  , data = data_state
 )
 ```
 
 
+```{r}
+data_sept18
+```
+
+
+```{r}
+data_sept18[, .N, hh1][order(hh1)]
+
+X = data_sept18[, .(state = as.character(sstate)
+                    , sex_male = as.numeric(sex == 'Male')
+                    , sex_female = as.numeric(sex == 'Female')
+                    , age = as.numeric(age)
+                    
+                    , educ_postgrad = as.numeric(grepl("Postgraduate", educ))
+                    , educ_bach = as.numeric(grepl("Four year", educ))
+                    , educ_assoc = as.numeric(grepl("Two year associate|Sone college", educ))
+                    , educ_highschool = as.numeric(grepl("High school graduate", educ))
+                    , educ_none = as.numeric(grepl("Less than high school|High school incomplete", educ))
+                    
+                    , hisp = as.numeric(hisp == 'Yes')
+                    , race_white = as.numeric(racecmb == 'White')
+                    , race_black = as.numeric(racecmb == 'Black or African-American')
+                    , race_asian = as.numeric(racecmb == 'Asian or Asian-American')
+                    , race_mixedother = as.numeric(racecmb == 'Mixed Race' | racecmb == 'Or some other race')
+                    
+                    , relig_protestant = as.numeric(grepl("Protestant|Christian", relig))
+                    , relig_catholic = as.numeric(grepl("Catholic", relig))
+                    , relig_athiest = as.numeric(grepl("Athiest|Agnostic", relig))
+                    , relig_jewish = as.numeric(grepl("Jewish", relig))
+                    , relig_muslim = as.numeric(grepl("Muslim", relig))
+                    , relig_LDS = as.numeric(grepl("Mormon", relig))
+                    
+                    , hh_n = ifelse(hh1 == '8 or more', 8, ifelse(hh1 == "Don't know/Refused", 2, as.numeric(hh1)))
+                    
+                    , income_under10 = as.numeric(income == 'Less than $10,000')
+                    , income_10to20 = as.numeric(income == '10 to under $20,000')
+                    , income_20to30 = as.numeric(income == '20 to under $30,000')
+                    , income_30to40 = as.numeric(income == '30 to under $40,000')
+                    , income_40to50 = as.numeric(income == '40 to under $50,000')
+                    , income_50to75 = as.numeric(income == '50 to under $75,000')
+                    , income_75to100 = as.numeric(income == '75 to under $100,000')
+                    , income_100to150 = as.numeric(income == '100 to under $150,000')
+                    , income_over150 = as.numeric(income == 'Over $150,000')
+                    , income_refused = as.numeric(income == "(VOL) Don't know/Refused")
+                    )]
+
+# center and scale X
+X_numeric = scale(X[, 2:ncol(X)])
+
+# replace NA and NaN with 0
+X_numeric = apply(X_numeric, 2, function(x) {
+  x[is.na(x) | is.nan(x)] <- 0
+  x
+})
+# create full covar matrix
+X = data.frame(state = X$state, X_numeric)
+
+
+##### Create test/training split
+set.seed(123)
+# train_ind = createDataPartition(X
+#                                 , y = X$state
+#                                 , p = .6, list = FALSE)
+
+train_ind = sample.int(nrow(X), size = 1000, replace = F)
+
+X_train = X[train_ind, ]
+X_test = X[-train_ind, ]
+
+Y_train = data_sept18[train_ind, .(state = as.character(state), y_dem = as.numeric(qsupport == '1-D'))]
+Y_test = data_sept18[-train_ind, .(state = as.character(state), y_dem = as.numeric(qsupport == '1-D'))]
+
+# create data that we actually observe
+Y_train_agg = Y_train[, .(y_dem_pct = mean(y_dem), .N), by = state]
+
+Y_train_agg
+```
 
 ## Mean embeddings
 
@@ -181,33 +258,72 @@ We observe bags of points $\{x_j^i\}_{j = 1}^{N_i}$ from $i = 1, \dots, n$, wher
 where $\mathbf{u} = \{u_l\}_{l = 1}^d$ are a set of landmark points.  For now we'll set $d = 100$ and choose $u_l$ using k-means clustering.
 
 
+Specify landmark points $\mathbf{u} = (u_1, \dots, u_k)$ as the centroids of k-means clustering
 
 ```{r}
-# choose 3 features - age, gender and white
-X = data_sept18[, .(age = as.numeric(age), female = as.numeric(sex == 'Female'), white = as.numeric(racecmb == 'White'))]
-Y = data_sept18[, .(dem_pct = mean(as.numeric(qsupport == '1-D'))), by = sstate]
+n_centers = 50
+groups = kmeans(X_train[, -1], centers = n_centers)
+u = as.matrix(groups$centers)
+head(u)
+```
 
-c = kmeans(X, centers = 100)
-c$centers
 
-rbf = rbfdot(sigma = 0.5)
+Create RBF kernel and get embeddings of training set $\phi(x)$ using kernel and landmark points
+$$\phi(x_i) = [k(x_i, u_1), \dots, k(x_i, u_k)]$$
 
-embeddings = kernelMatrix(rbf, x = as.matrix(X), y = as.matrix(c$centers))
-embeddings = data.table(state = as.character(data_sept18$sstate), embeddings)
-setnames(embeddings, c('state', paste0('k_u', 1:100)))
+Choose scale parameter $\sigma$ for RBF kernel - use median heuristic for now
+```{r}
+rbf1 = rbfdot(sigma = 1)
 
-#calculate mean of each state
-embeddings[, mean(k_u10)]
-mu_hat = embeddings[, lapply(.SD, mean), .SDcols = names(embeddings)[2:ncol(embeddings)], by = state][order(state)]
+K_sigma = kernelMatrix(rbf1, x = as.matrix(X_train[, -1]), y = u)
+dim(K_sigma)
+sigma = median(K_sigma)
+```
 
-fit_lambda = cv.glmnet(x = as.matrix(mu_hat[, -1, with = F]), y = Y$dem_pct, nfolds = 10)
-ind = which(coef(fit_lambda, s = 'lambda.min') != 0)
 
-fit = glmnet(x = as.matrix(mu_hat[, c(ind + 1), with = F]), y = Y$dem_pct)
+```{r}
+rbf = rbfdot(sigma = 0.1)
+phi_x = kernelMatrix(rbf, x = as.matrix(X_train[, -1]), y = u)
+phi_x = data.table(state = X_train$state, phi_x)
+setnames(phi_x, c('state', paste0('u', 1:n_centers)))
 
-mu_hat_gender = data.table(cbind(embeddings, sex = data_sept18$sex))[, lapply(.SD, mean), .SDcols = names(embeddings)[2:ncol(embeddings)], by = .(state, sex)]
+head(phi_x)
+```
 
-y_hat = predict(fit, newx = as.matrix(mu_hat_gender[, c(ind + 2), with = F]), s= 0)
+Calculate mean embeddings for each state
+
+```{r}
+mu_hat = phi_x[, lapply(.SD, mean), .SDcols = names(phi_x)[2:ncol(phi_x)], by = state][order(state)]
+mu_hat
+```
+
+### Model 1 - Frequentist
+Normal LASSO regression on the kernel mean embeddings - no Bayesian treatment
+
+```{r}
+# fit initial lasso to find significant covars
+fit_lambda = cv.glmnet(x = as.matrix(mu_hat[, -1, with = F])
+                       , y = Y_train_agg[order(state), ]$y_dem_pct
+                       , nfolds = 10)
+
+# get indicies of non-0 covars (except intercept)
+ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)
+
+# re-fit LASSO only with non-0 covars
+fit = glmnet(x = as.matrix(mu_hat[, ind + 1, with = F])
+             , y = Y_train_agg[order(state), ]$y_dem_pct)
+```
+
+
+ Predict at the individual level
+ 
+```{r}
+# get embeddings of test points
+phi_x_test = kernelMatrix(rbf, x = as.matrix(X_test[, -1]), y = u)
+phi_x_test = data.table(state = X_test$state, phi_x_test)
+setnames(phi_x_test, c('state', paste0('u', 1:n_centers)))
+
+y_hat = predict(fit, newx = as.matrix(X_test[, ind + 1]), s= 0)
 y_hat = cbind(mu_hat_gender[,.(state,sex)], y_hat = y_hat)
 
 y_actual = data_sept18[, .(y_dem = mean(as.numeric(qsupport == '1-D'))), by = .(sstate,sex)]
@@ -217,6 +333,32 @@ y_hat = merge(y_actual, y_hat, by = c('state','sex'), all = T)
 plot(y_hat$y_hat.1 ~ y_hat$y_dem, col = y_hat$sex)
 ```
 
+
+
+
+## THINGS TO DO
+
+*parameter choice*:
+
+- number of landmark points (how is this normally chosen?)
+- Calculate landmark points with full data set or just training?
+- scale parameter $\sigma$ for RBF kernel (right now just usiing median heuristic)
+
+Bags based on demos instead of state (more specific to this poll than most we'd be dealing with)?
+
+*Choose data set*:
+* census microdata with actual county-level election outcomes. pro: large (like actual voterfile), con: outcomes not at the individual-level
+* Pew survey data. pro: outcomes at the individual-level, con: it's small
+* census microdata for covar data with survey data for outomes.  Pro: large covar data, closer to real scenario, con: can only link at the state-level, still no individual-level outcome data
+* synthetic data. pro: can make it exactly what we want, con: effort to synthesize
+
+** benefit of the larger data set - more realistic, we'd really need the landmark points when we don't if only working with the survey data
+
+Compare against lasso/custom-built logit or maybe NN that has access to the individual-level outcomes (more realistic benchmark than)
+
+**Implement full Bayesian treatment (uncertainty in mean embeddings as well as bag size)
+
+MRP - standard for EI in political applications
 
 
 
