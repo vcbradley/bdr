@@ -144,6 +144,9 @@ grid.arrange(plot_gp_prior, plot_gp_post, nrow = 1)
 ### Data
 
 ```{r load-data, echo = F, message= F}
+
+# note: geo variables that begin with 's' are self-reported (I think based on the readme) - more accurate
+
 data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T), stringsAsFactors = F)
 data_sept18
 ```
@@ -247,11 +250,12 @@ train_ind = sample.int(nrow(X), size = 1000, replace = F)
 X_train = X[train_ind, ]
 X_test = X[-train_ind, ]
 
-Y_train = data_sept18[train_ind, .(state = as.character(state), y_dem = as.numeric(qsupport == '1-D'))]
-Y_test = data_sept18[-train_ind, .(state = as.character(state), y_dem = as.numeric(qsupport == '1-D'))]
+Y_train = data_sept18[train_ind, .(state = as.character(sstate), y_dem = as.numeric(qsupport == '1-D'))]
+Y_test = data_sept18[-train_ind, .(state = as.character(sstate), y_dem = as.numeric(qsupport == '1-D'))]
 
 # create data that we actually observe
 Y_train_agg = Y_train[, .(y_dem_pct = mean(y_dem), .N), by = state]
+Y_test_agg = Y_test[, .(y_dem_pct = mean(y_dem), .N), by = state]
 
 Y_train_agg
 ```
@@ -303,13 +307,20 @@ mu_hat
 ```
 
 ### Model 1 - Frequentist
-Normal LASSO regression on the kernel mean embeddings - no Bayesian treatment
+Normal LASSO regression on the kernel mean embeddings - no Bayesian treatment.
+
+$$y_i = \beta^T\hat{\mu}_i + b$$
+Doesn't account for uncertainty in the coefficients $\beta$ or in the mean embeddings $\hat{\mu}_i$, or observation error
+
+#### Build the model
+
+Use 5-fold CV kernel LASSO to estimate $\beta$, $b$ for $\hat{y}_i = \beta^T\hat{\mu}_i + b$.  Use the first LASSO to select non-zero coefs, then re-fit without penalty to accont for covariate shrinkage.
 
 ```{r}
 # fit initial lasso to find significant covars
 fit_lambda = cv.glmnet(x = as.matrix(mu_hat[, -1, with = F])
                        , y = Y_train_agg[order(state), ]$y_dem_pct
-                       , nfolds = 5)
+                       , nfolds = 7)
 
 # get indicies of non-0 covars (except intercept)
 ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)
@@ -320,15 +331,50 @@ fit = glmnet(x = as.matrix(mu_hat[, ind + 1, with = F])
 ```
 
 
- Predict at the individual level
- 
+#### Predict
+
+Get embeddings of test points and empirical means of bags of embedded test points.  Use same landmark points $u$ as for the training set.
 ```{r}
 # get embeddings of test points
 phi_x_test = kernelMatrix(rbf, x = as.matrix(X_test[, -1]), y = u)
 phi_x_test = data.table(state = X_test$state, phi_x_test)
 setnames(phi_x_test, c('state', paste0('u', 1:n_centers)))
 
-# predict on new data set of X_test embedded in feature space
+# calculate empirical means
+mu_hat_test = phi_x_test[, lapply(.SD, mean), .SDcols = names(phi_x_test)[2:ncol(phi_x_test)], by = state][order(state)]
+mu_hat_test_gender = cbind(phi_x_test, sex_female = as.numeric(X_test$sex_female > 0))[, lapply(.SD, mean), .SDcols = names(phi_x_test)[2:ncol(phi_x_test)], by = .(state, sex_female)][order(state, sex_female)]
+```
+
+
+First, test predictions at the state-level.  We can also test at the state-gender level.
+```{r}
+y_hat_agg = predict(fit, newx = as.matrix(mu_hat_test[, ind + 1, with = F]), s = 0)
+y_hat_agg = cbind(Y_test[, .(y_dem_pct = mean(y_dem), .N), by = state][order(state)], y_hat_agg)
+
+ggplot(y_hat_agg, aes(x = y_dem_pct, y = `1`, size = N)) + 
+  geom_point() + 
+  ylab("Predicted % Dem") +
+  xlab("Actual % Dem") +
+  ggtitle("Predicted by actual % Dem support across states")
+
+y_hat_agg_gender = predict(fit, newx = as.matrix(mu_hat_test_gender[, ind + 1, with = F]), s = 0)
+y_hat_agg_gender = cbind(cbind(Y_test, sex_female = as.numeric(X_test$sex_female > 0))[, .(y_dem_pct = mean(y_dem), .N), by = .(state, sex_female)][order(state, sex_female)], y_hat_agg_gender)
+
+ggplot(y_hat_agg_gender, aes(x = y_dem_pct, y = `1`, size = N, color = as.factor(sex_female))) + 
+  geom_point() + 
+  geom_abline(intercept = 0, slope = 1) +
+  ylab("Predicted % Dem") +
+  xlab("Actual % Dem") +
+  ggtitle("Predicted by actual % Dem support across states & genders")
+
+print(paste0("MSE (state): ", mean((y_hat_agg[,`1`] - y_hat_agg$y_dem_pct)^2)))
+print(paste0("MSE (state & gender): ", mean((y_hat_agg_gender[,`1`] - y_hat_agg_gender$y_dem_pct)^2)))
+
+```
+
+Predict at the individual-level
+```{r}
+# predict on new (individual-level) data set of X_test embedded in feature space
 y_hat = predict(fit, newx = as.matrix(phi_x_test[, ind + 1, with = F]), s= 0)  #no regularization
 y_hat = cbind(Y_test, y_hat)
 
@@ -356,26 +402,79 @@ ggplot(y_hat[, .(pct_y_dem = mean(y_dem)), by = pred_decile], aes(x = pred_decil
 ```
 
 
+
 ## Model 2 - Bayesian Linear Regression
 
+Adding uncertainty: incorporate uncertainty of the coefficients $\beta$
+
+We can interpret this in 2 ways: 1) Bayesian linear regression 2) Gaussian process regression conditioned on finite set of observed points.
+
+1) Bayesian linear regression
+$$\beta \sim \mathcal{N}(0, \Sigma_p)\\
+y_i | \beta, \mathbf{x}_i \sim \mathcal{N}(\beta^T\hat{\mu}_i, \sigma^2)$$
+
+For disitribution regression, we substitute in the empirical mean embeddings $\hat{\mu}_i$ for $x_i$.
+
+2) GP regression conditioned on observed points (weight space view)
+$$
+f(\mathbf{x}) = \phi(\mathbf{x})^T\mathbf{w}\\
+y = f(\mathbf{x}) + \epsilon\\
+\epsilon \sim \mathcal{N}(0, \sigma_n^2)\\
+\mathbf{w} \sim \mathcal{N}(0, \Sigma_p)
+$$
+
+we can equivalently write
+$$
+f \sim \mathcal{GP}(0, k(x, x'))\\
+y_i|f(x_i) \sim \mathcal{N}(0, K + I\sigma^2)
+$$
+where $k(x,x')$ is the kernel corresponding to the feature map $\phi$
+
+For GPR, the feature map $\phi(x_i)$ corresponds to the kernel that was used to embed $x_i$ in feature space.  Using landmark points $\mathbf{u} = \{u_l\}_{l=1}^d$, this becomes $\phi(x_i) = [k(x_i, u_1), \dots, k(x_i, u_l)]$
+
+We can interpret the weights $\mathbf{w}$ of GP regression as the coefficients $\beta$ in BLR.  $\Sigma_p$ is the prior covariance matrix for the weights/coefficients.
+
+Fit GP
 ```{r}
 # observations = mu_hat
 # outcomes = Y_train_agg$y_dem_pct
 
-fit_gp = gausspr(x = as.matrix(mu_hat[, -1]), y = Y_train_agg$y_dem_pct)
+fit_gp = gausspr(x = as.matrix(mu_hat[, -1]), y = Y_train_agg[order(state),]$y_dem_pct, kernel = 'vanilladot')
+fit_gp
 
+#fit_gp@alpha
+```
+
+Now, we predict the GP at the bag-level
+```{r}
+
+y_hat_agg = predict(fit, newx = as.matrix(mu_hat_test[, ind + 1, with = F]), s = 0)
+y_hat_agg = cbind(Y_test[, .(y_dem_pct = mean(y_dem), .N), by = state][order(state)], y_hat_agg)
+
+ggplot(y_hat_agg, aes(x = y_dem_pct, y = `1`, size = N)) + 
+  geom_point() + 
+  ylab("Predicted % Dem") +
+  xlab("Actual % Dem") +
+  ggtitle("Predicted by actual % Dem support across states")
+```
+
+And at the individual level
+```{r}
 y_hat_gp = predict(fit_gp, newdata = phi_x_test[, -1])
 y_hat_gp = cbind(Y_test, y_hat_gp)
 
 y_hat_gp[, pred_decile := cut(V1, breaks = quantile(V1, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
-
-#ggplot(y_hat, aes(x = `1`, color = as.factor(y_dem)), alpha = 0.2) + geom_density()
 
 #plot actual pct of each decile that supports dems
 ggplot(y_hat_gp[, .(pct_y_dem = mean(y_dem)), by = pred_decile], aes(x = pred_decile, y = pct_y_dem)) + 
   geom_bar(stat = 'identity') +
   ggtitle("Pct Dem supporter by score decile")
 ```
+
+
+
+
+
 
 
 
@@ -389,6 +488,10 @@ ggplot(y_hat_gp[, .(pct_y_dem = mean(y_dem)), by = pred_decile], aes(x = pred_de
 
 - how much to focus on this specific example v. the more general question of "does dist reg work for individuals"?
 - What are the reasons that you're skeptical that BDR will work for individuals?  What are the shortcomings that you envision?
+
+- advantages to implementing base model as GPR v. BLR?  GPR more flexible for non-Gaussian outcomes (i.e. multinomial)?  Can combine kernels (i.e. mean embeddings + spatial component)?  Downside is computation?
+
+- batching?
 
 *Choose data set*:
 
@@ -428,6 +531,9 @@ Implement *full Bayesian treatment* (uncertainty in mean embeddings as well as b
 
 - flesh out full generative model
 
+*Structured observational uncertainty*
+
+- heriarchical model?
 
 
 
