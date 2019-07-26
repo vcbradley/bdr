@@ -1,0 +1,293 @@
+---
+title: "BDR Pew Data"
+output: html_notebook
+---
+
+```{r}
+rm(list = ls())
+library(data.table)
+library(foreign)
+library(kernlab)
+library(MASS)  # for mvrnorm
+library(ggplot2)
+library(gridExtra)
+library(glmnet)
+library(caret)
+library(memisc) #cases
+setwd('~/github/bdr/')
+
+source('functions.R')
+```
+
+
+
+## Read in data
+```{r}
+
+# import data
+data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T), stringsAsFactors = F)
+data_sept18
+
+data_june18 = data.table(read.spss('data/June18/June18 public.sav', to.data.frame = T), stringsAsFactors = F)
+data_june18
+
+data_may18 = data.table(read.spss('data/May18/May18 public.sav', to.data.frame = T), stringsAsFactors = F)
+data_may18
+
+# data_march18 = data.table(read.spss('data/March18/March18 public.sav', to.data.frame = T), stringsAsFactors = F)
+# data_march18
+
+###### PREP DATA
+
+#specify which should be survey
+survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology')
+file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
+
+
+# covars = c('sample', 'int_date', 'sex', 'educ', 'hisp', 'racecmb', 'relig', 'income', 'party', 'hh1', 'ql1', 'sstate', 'sdensity')
+# 
+# # check that covariates are in all data sets
+# covars %in% names(data_june18)
+# covars %in% names(data_sept18)
+# covars %in% names(data_may18)
+# covars %in% names(data_march18)
+
+data_sept18
+
+data_may18[, .N, party]
+```
+
+
+## Recode Data
+```{r, echo = F, warning=F}
+# RECODE all data sets
+data_recoded = rbindlist(lapply(list(data_sept18, data_may18, data_june18), doPewRecode))
+
+data_recoded
+```
+
+
+## Categorize variables
+```{r}
+# create data table with vars and levels
+covars = names(data_recoded)[grepl('demo', names(data_recoded))]
+covars = data.table(do.call(rbind, lapply(covars, function(c){
+  cbind(c, data_recoded[, .(level = unique(get(c)))][order(level)])
+})))
+setnames(covars, c('var', 'level'))
+covars[, level_modmat := paste0(var, level)]
+
+covars[, in_survey := as.numeric(var %in% survey_vars)]
+covars[, in_both := as.numeric(var %in% file_and_survey_vars)]
+covars[, in_file := as.numeric(in_survey + in_both == 0)]
+```
+
+## Get data partitions
+
+### Proability of surveyed
+```{r}
+# scale age and set NAs to 0
+data_recoded[, age_scaled := scale(age_num)]
+data_recoded[is.na(age_scaled), age_scaled := 0]
+
+data_recoded[, p_surveyed := 
+               (-2)
+             + age_scaled 
+             - 0.5 * is.na(age_num) 
+             + 1.5 * as.numeric(demo_mode == 'cell') 
+             - 1.5 * as.numeric(demo_party == '05-Ind')
+             - 3 * as.numeric(demo_party == "99-DK/refused") 
+             + 1.5 * as.numeric(demo_education %in% c('01-postgrad', '02-bach'))
+             + 3 * as.numeric(demo_ideology == 'Very conservative' | demo_ideology == 'Very liberal')
+             ]
+data_recoded[, p_surveyed := exp(p_surveyed)/(1 + exp(p_surveyed))]
+hist(data_recoded[, p_surveyed])
+
+data_recoded[, .(.N, mean(p_surveyed)), .(demo_age_bucket)][order(demo_age_bucket)]
+data_recoded[, .(.N, mean(p_surveyed)), .(demo_mode)][order(demo_mode)]
+data_recoded[, .(.N, mean(p_surveyed)), .(demo_party)][order(demo_party)]
+data_recoded[, .(.N, mean(p_surveyed)), .(demo_ideology)][order(demo_ideology)]
+```
+
+### Probability of matched
+```{r}
+data_recoded[, p_matched := NULL]
+data_recoded[, p_matched :=
+               -2 +
+               -2 * as.numeric(demo_mode == 'landline') 
+             + 3 * as.numeric(demo_race == 'W')
+             + -2 * as.numeric(demo_reg == '03-No')
+             + -1 * as.numeric(demo_hhsize == 2)
+             + -2 * as.numeric(demo_hhsize == 3)
+             + 0.5*age_scaled
+             + as.numeric(demo_income)/3
+             - 4* as.numeric(demo_income == '99-DK/refused')
+             ]
+data_recoded[, p_matched := exp(p_matched)/(1 + exp(p_matched))]
+hist(data_recoded$p_matched)
+
+data_recoded[, .(.N, mean(p_matched)), demo_mode]
+data_recoded[, .(.N, mean(p_matched)), demo_hispanic]
+data_recoded[, .(.N, mean(p_matched)), demo_age_bucket][order(demo_age_bucket)]
+```
+
+### Test/training sets
+```{r}
+testtrain = getTestTrain(data = data_recoded
+             , n_holdout = 1000, n_surveyed = 2000, n_matched = 1000
+             , p_surveyed = data_recoded$p_surveyed
+             , p_matched = data_recoded$p_matched
+             )
+data_recoded[, .N, list(holdout, surveyed, matched, voterfile)]
+
+data_recoded = testtrain$data
+
+data_recoded[, .(.N, prop_surveyed = mean(surveyed)), demo_age_bucket][order(demo_age_bucket)]
+data_recoded[, .(.N, prop_surveyed = mean(surveyed)), demo_party][order(demo_party)]
+
+data_recoded[, .(.N, mean(y_dem)), .(holdout, surveyed, matched)]
+data_recoded[, mean(y_dem)]
+```
+
+## Simple Dist Regression 
+
+#### Assign bags
+```{r}
+#### Create bags of survey responses using variables observed in BOTH survey AND voterfile
+# should we make the bags with the subset of data from the survey, or the whole file???
+
+bags = getBags(data = data_recoded[surveyed == 1,]
+        , vars = file_and_survey_vars
+        , n_bags = 30
+        , newdata = data_recoded[voterfile == 1 | holdout == 1, ])
+
+data_recoded[surveyed == 1, bag := bags$bags]
+data_recoded[voterfile == 1 | holdout == 1, bag := bags$bags_newdata]
+
+data_recoded[, .(.N, mean(surveyed)), .(bag)][order(bag)]
+```
+
+#### Get landmark points
+```{r}
+landmarks = getLandmarks(data = data_recoded
+             , vars = unique(covars[in_both == 1 | in_file == 1,]$var)
+             , n_landmarks = 12
+             , subset_ind = (data_recoded$voterfile == 1))
+
+X_file = landmarks$X[data_recoded$voterfile == 1, ]
+X_file_holdout = landmarks$X[data_recoded$holdout == 1, ]
+
+```
+
+#### Embed file in feature space
+
+Choose scale parameter $\sigma$ for RBF kernel - use median heuristic for now
+```{r}
+# rbf1 = rbfdot(sigma = 1)
+# 
+# K_sigma = kernelMatrix(rbf1, x = as.matrix(X_file), y = landmarks$landmarks)
+# sigma = median(K_sigma)
+
+```
+
+Do basic Dist Reg
+```{r}
+train_bag = data_recoded[voterfile == 1, bag]
+test_bag = data_recoded[holdout == 1, bag]
+
+# calculate dependent var in each bag
+Y_svy_bag = data_recoded[surveyed == 1, .(y_mean = mean(y_dem)), bag][order(bag)]
+
+# get features
+features = getFeatures(train = X_file
+                       , train_bag = train_bag
+                       , test = X_file_holdout
+                       , test_bag = test_bag
+                       , landmarks = landmarks$landmarks
+                       , sigma = 0.01)
+
+# do basic DR
+fit_basicDR = fitLasso(mu_hat = features$mu_hat
+          , Y_bag = Y_svy_bag$y_mean
+          , phi_x_train = features$phi_x_train
+          , phi_x_test = features$phi_x_test
+          )
+
+# score the file
+data_recoded[voterfile == 1, y_dem_basicdr := fit_basicDR$Y_train]
+data_recoded[holdout == 1, y_dem_basicdr := fit_basicDR$Y_test]
+
+data_recoded[, .N, .(is.na(y_dem_basicdr))]
+
+calcMSE(Y = data_recoded$y_dem, Y_pred = data_recoded$y_dem_basicdr)
+```
+
+
+```{r}
+
+data_recoded[voterfile == 1 | holdout == 1, y_dem_basicdr_dec := cut(y_dem_basicdr, breaks = quantile(y_dem_basicdr, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
+
+ggplot(data_recoded[voterfile == 1, .(pct_y_dem = mean(y_dem)), by = y_dem_basicdr_dec], aes(x = y_dem_basicdr_dec, y = pct_y_dem)) + 
+  geom_bar(stat = 'identity') +
+  ggtitle("Pct Dem supporter by score decile - voterfile")
+ggplot(data_recoded[holdout == 1, .(pct_y_dem = mean(y_dem)), by = y_dem_basicdr_dec], aes(x = y_dem_basicdr_dec, y = pct_y_dem)) + 
+  geom_bar(stat = 'identity') +
+  ggtitle("Pct Dem supporter by score decile - holdout")
+```
+
+Hyperparameter tuning
+```{r}
+bagging_vars = file_and_survey_vars
+regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
+
+fit_basicDR = doBasicDR(data = data_recoded
+                     , bagging_vars = file_and_survey_vars
+                     , regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
+                     , outcome = 'y_dem'
+                     , n_bags = 75
+                     , n_landmarks = 100
+                     , sigma = 0.01
+                     , bagging_ind = 'surveyed'
+                     , train_ind = 'voterfile'
+                     , test_ind = 'holdout')
+
+
+names(fit_basicDR)
+```
+
+
+```{r}
+param_sigma = exp(-seq(1,6, length.out = 10))
+param_nlandmarks = round(exp(seq(2.5, 7, length.out = 10)))
+param_nbags = c(25, 50, 75, 100, 150, 200)
+
+param_grid = expand.grid(sigma = param_sigma, n_bags = param_nbags, n_landmarks = param_nlandmarks)
+
+grid_search = apply(param_grid, 1, function(p){
+  cat(p)
+  cat('\n')
+  mse = tryCatch(doBasicDR(data = data_recoded
+                     , bagging_vars = file_and_survey_vars
+                     , regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
+                     , outcome = 'y_dem'
+                     , n_bags = p[2]
+                     , n_landmarks = p[3]
+                     , sigma = p[1]
+                     , bagging_ind = 'surveyed'
+                     , train_ind = 'voterfile'
+                     , test_ind = 'holdout'
+                  )$mse_test
+                 , error = function(e) return(0))
+  
+  mse
+})
+```
+
+
+
+```{r}
+ggplot(data.table(param_grid, grid_search), aes(x = n_landmarks, y = grid_search)) + geom_point()
+
+ggplot(data.table(param_grid, grid_search), aes(x = log(n_landmarks), y = log(sigma))) + geom_tile(aes(fill = -log(grid_search))) + facet_grid(~n_bags)
+```
+
