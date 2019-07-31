@@ -1,9 +1,10 @@
 ---
-title: "BDR Pew Data"
+title: "BDR with Pew Data"
 output: html_notebook
 ---
 
-```{r}
+
+```{r set-up}
 rm(list = ls())
 library(data.table)
 library(foreign)
@@ -13,6 +14,7 @@ library(ggplot2)
 library(gridExtra)
 library(glmnet)
 library(caret)
+#library(plot3D)
 library(memisc) #cases
 setwd('~/github/bdr/')
 
@@ -22,44 +24,40 @@ source('functions.R')
 
 
 ## Read in data
-```{r}
+Data from 3 surveys:
+
+* https://www.people-press.org/dataset/september-2018-political-survey/
+* https://www.people-press.org/dataset/june-2018-political-survey/
+* https://www.people-press.org/dataset/may-2018-political-survey/
+
+All have a range of (overlapping) demographic variables AND ask about support in the 2018 midterms.
+
+```{r data, warning=FALSE}
 
 # import data
 data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T), stringsAsFactors = F)
-data_sept18
 
 data_june18 = data.table(read.spss('data/June18/June18 public.sav', to.data.frame = T), stringsAsFactors = F)
-data_june18
 
 data_may18 = data.table(read.spss('data/May18/May18 public.sav', to.data.frame = T), stringsAsFactors = F)
-data_may18
-
-# data_march18 = data.table(read.spss('data/March18/March18 public.sav', to.data.frame = T), stringsAsFactors = F)
-# data_march18
-
-###### PREP DATA
-
-#specify which should be survey
-survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology')
-file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
-
-
-# covars = c('sample', 'int_date', 'sex', 'educ', 'hisp', 'racecmb', 'relig', 'income', 'party', 'hh1', 'ql1', 'sstate', 'sdensity')
-# 
-# # check that covariates are in all data sets
-# covars %in% names(data_june18)
-# covars %in% names(data_sept18)
-# covars %in% names(data_may18)
-# covars %in% names(data_march18)
 
 data_sept18
 
 data_may18[, .N, party]
 ```
 
+## Specify where vars observed
+
+The idea of this approach is to find a way to leverage the extensive/valuable data on the voterfile to outcomes observed in a survey (where more limited covariates are collected).  Therefore, we need to assign variables to where we're saying they're observed (in the survey, in the voterfile or in both).
+```{r}
+# specify where each var is observed (survey, file or both)
+survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology', 'demo_party')
+file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
+```
+
 
 ## Recode Data
-```{r, echo = F, warning=F}
+```{r, message = F, warning=F}
 # RECODE all data sets
 data_recoded = rbindlist(lapply(list(data_sept18, data_may18, data_june18), doPewRecode))
 
@@ -68,6 +66,8 @@ data_recoded
 
 
 ## Categorize variables
+Create a data table of all of the covars we have to work with
+
 ```{r}
 # create data table with vars and levels
 covars = names(data_recoded)[grepl('demo', names(data_recoded))]
@@ -80,9 +80,22 @@ covars[, level_modmat := paste0(var, level)]
 covars[, in_survey := as.numeric(var %in% survey_vars)]
 covars[, in_both := as.numeric(var %in% file_and_survey_vars)]
 covars[, in_file := as.numeric(in_survey + in_both == 0)]
+
+covars[, .N, .(in_survey, in_file, in_both)]
 ```
 
 ## Get data partitions
+
+We need to divide the data into the following partitions:
+
+* Survey data - *matched* to the voterfile
+* Survey data - *unmatched* to the voterfile
+* Voterfile data
+* Holdout set
+
+We also want to mirror real conditions, in that the survey data is not selected completely at random from the voterfile - it should be biased.  The same is true for the survey data that we can match to the voterfile.  Therefore, we specify a "surveyed mechanism" and a "matched mechanism" based on my knowledge of common patterns observed in real situations.
+
+Generally, those who respond to surveys tend to be older, unemployed/retired/disabled, partisan, more educated, have white collar jobs and reached on cell phones.  We are more likely to be able to match someone to the voterfile if they are higher income (more consumer data available on them), reached on a cell-phone, older, white, live in a smaller household.  These trends are reflected in the formula for $p_\text{missing}$ and $p_{matched}$ specified below.
 
 ### Proability of surveyed
 ```{r}
@@ -92,7 +105,7 @@ data_recoded[is.na(age_scaled), age_scaled := 0]
 
 data_recoded[, p_surveyed := 
                (-2)
-             + age_scaled 
+             + 2 * age_scaled 
              - 0.5 * is.na(age_num) 
              + 1.5 * as.numeric(demo_mode == 'cell') 
              - 1.5 * as.numeric(demo_party == '05-Ind')
@@ -119,7 +132,7 @@ data_recoded[, p_matched :=
              + -2 * as.numeric(demo_reg == '03-No')
              + -1 * as.numeric(demo_hhsize == 2)
              + -2 * as.numeric(demo_hhsize == 3)
-             + 0.5*age_scaled
+             + 2 *age_scaled
              + as.numeric(demo_income)/3
              - 4* as.numeric(demo_income == '99-DK/refused')
              ]
@@ -131,35 +144,69 @@ data_recoded[, .(.N, mean(p_matched)), demo_hispanic]
 data_recoded[, .(.N, mean(p_matched)), demo_age_bucket][order(demo_age_bucket)]
 ```
 
+Check correlation between the generated probabilities
+```{r}
+ggplot(data_recoded, aes(x = p_surveyed, y = p_matched)) + geom_point()
+```
+
+
+
 ### Test/training sets
+Generate actual partitions based on $p_\text{surveyed}$ and $p_\text{matched}$.  The holdout (test) set is selected first using $p=1/n$ for all $n$ units in the Pew data.  From the remaining data, we first select the set of observed survey data proportional to $p_\text{surveyed}$.  Last, from the surveyed data, we select the subset of data that matches to the voterfile with probability $p_\text{matched}$.
+
 ```{r}
 testtrain = getTestTrain(data = data_recoded
              , n_holdout = 1000, n_surveyed = 2000, n_matched = 1000
              , p_surveyed = data_recoded$p_surveyed
              , p_matched = data_recoded$p_matched
              )
-data_recoded[, .N, list(holdout, surveyed, matched, voterfile)]
-
 data_recoded = testtrain$data
 
-data_recoded[, .(.N, prop_surveyed = mean(surveyed)), demo_age_bucket][order(demo_age_bucket)]
-data_recoded[, .(.N, prop_surveyed = mean(surveyed)), demo_party][order(demo_party)]
+# N and pct voting dem by partition
+data_recoded[, .(.N, mean(y_dem)), list(holdout, surveyed, matched, voterfile)]
 
-data_recoded[, .(.N, mean(y_dem)), .(holdout, surveyed, matched)]
-data_recoded[, mean(y_dem)]
+# check prop surveyed and matched by demos
+data_recoded[, .(.N, prop_surveyed = mean(surveyed), prop_matched = sum(matched)/sum(surveyed), overall_matched = mean(matched)), demo_age_bucket][order(demo_age_bucket)]
+data_recoded[, .(.N, prop_surveyed = mean(surveyed), prop_matched = sum(matched)/sum(surveyed), overall_matched = mean(matched)), demo_party][order(demo_party)]
+
 ```
 
-## Simple Dist Regression 
+## Do basic dist regression, one step at a time
+
+First, we'll walk through each step in distribution regression, fixing hyperparameters:
+
+1. **Bag the data.** Since we actually observed our outcome at the individual level (not at the bag level), we have to bag the data ourselves. We'll do this with k-means using the variables observed both in the survey AND in the voterfile.  This is necessary so that we can link the bagged outcomes to the voterfile data.
+2. **Get landmark points.** In order to cut down on the dimensionality of the task, we'll identify a set of $L$ landmark points $\mathbf{u} = (u_1, \dots, u_L)$, also using k-means.  The landmarks will be the centroids of the clusters indentified with k-means.  We'll use the landmark points to embed the voterfile data in feature space.
+3. **Embed in feature space.**  We need to embed the voterfile data in feature space.  We do this with a Gaussian kernel with length-scale $\sigma$.  The explicit feature representation for $x_i$ is given by $\phi(x_i) = [k(x_i, u_1), \dots, k(x_i, u_L)]$
+4. **Calculate the empirical mean of the embedded features.** Calculate the empirical mean of the explicit feature representations of each bag $j = 1, \dots, J$, $\hat{\mu}_j = \sum_{i=1}^{N_j} \phi(x_i)$
+5. **Do regularized regression**.  Regress the bagged outcome $y_j$ on the empirical mean embedding of each bag $\mu_j$.  We use a LASSO here, though we could use elastic net and optimize $\alpha$ as well as $\lambda$.
+6. **Predict**.  Use predict $\hat{y}_i$ (at the individual-level) using the regression coefficients learned in step 5.
+
+These steps are implemented below.
+
+### Some questions:
+
+* Should we tune n_bags and n_landmarks like we do $\sigma$?
+* Should we generate bags based on the whole dataset (survey + voterfile), or just based on the survey data?  Right now I'm generating the bags using only the survey data. In practice, the voterfile data will have MANY more observations than the survey data, so it's very unlikely that the survey will have bags that are empty in thhe file, while if we used only the voterfile data or voterfile + survey, much more likely that bags will be missing from the survey data.
+* Should the landmarks be a holdout set or centroids from k-means?  Andvantages/disadvantages?  I imagine an advantage of the centroids is that you don't lose N for the mean embedding?
+* Should I have a 5th data partition for tuning the hyperparams (right now I'm using the test set)?
+* Should I switch from LASSO to cv-chosen $\alpha$?
 
 #### Assign bags
 ```{r}
 #### Create bags of survey responses using variables observed in BOTH survey AND voterfile
 # should we make the bags with the subset of data from the survey, or the whole file???
 
+# sigma = 0.003 ## chosen with median heuristic
+n_bags = 50
+n_landmarks = 12
+
 bags = getBags(data = data_recoded[surveyed == 1,]
         , vars = file_and_survey_vars
-        , n_bags = 30
+        , n_bags = n_bags
         , newdata = data_recoded[voterfile == 1 | holdout == 1, ])
+table(bags$bags)
+length(unique(bags$bags))
 
 data_recoded[surveyed == 1, bag := bags$bags]
 data_recoded[voterfile == 1 | holdout == 1, bag := bags$bags_newdata]
@@ -171,11 +218,10 @@ data_recoded[, .(.N, mean(surveyed)), .(bag)][order(bag)]
 ```{r}
 landmarks = getLandmarks(data = data_recoded
              , vars = unique(covars[in_both == 1 | in_file == 1,]$var)
-             , n_landmarks = 12
+             , n_landmarks = n_landmarks
              , subset_ind = (data_recoded$voterfile == 1))
 
 X_file = landmarks$X[data_recoded$voterfile == 1, ]
-X_file_holdout = landmarks$X[data_recoded$holdout == 1, ]
 
 ```
 
@@ -183,46 +229,44 @@ X_file_holdout = landmarks$X[data_recoded$holdout == 1, ]
 
 Choose scale parameter $\sigma$ for RBF kernel - use median heuristic for now
 ```{r}
-# rbf1 = rbfdot(sigma = 1)
-# 
-# K_sigma = kernelMatrix(rbf1, x = as.matrix(X_file), y = landmarks$landmarks)
-# sigma = median(K_sigma)
+rbf1 = rbfdot(sigma = 1)
+K_sigma = kernelMatrix(rbf1, x = as.matrix(X_file), y = landmarks$landmarks)
+sigma = median(K_sigma)
 
-```
-
-Do basic Dist Reg
-```{r}
 train_bag = data_recoded[voterfile == 1, bag]
 test_bag = data_recoded[holdout == 1, bag]
 
+# get features
+features = getFeatures(data = landmarks$X
+                       , bag = data_recoded$bag
+                       , train_ind = data_recoded$voterfile # the col of indicators for the training set
+                       , landmarks = landmarks$landmarks
+                       , sigma = sigma)
+```
+
+#### Fit LASSO using mean feature embeddings
+```{r}
 # calculate dependent var in each bag
 Y_svy_bag = data_recoded[surveyed == 1, .(y_mean = mean(y_dem)), bag][order(bag)]
+# make sure Y has all levels
+Y_svy_bag = merge(data.table(bag = 1:n_bags), Y_svy_bag, all.x = T)
+Y_svy_bag[is.na(y_mean), y_mean := 0]
 
-# get features
-features = getFeatures(train = X_file
-                       , train_bag = train_bag
-                       , test = X_file_holdout
-                       , test_bag = test_bag
-                       , landmarks = landmarks$landmarks
-                       , sigma = 0.01)
+
 
 # do basic DR
 fit_basicDR = fitLasso(mu_hat = features$mu_hat
           , Y_bag = Y_svy_bag$y_mean
-          , phi_x_train = features$phi_x_train
-          , phi_x_test = features$phi_x_test
+          , phi_x = features$phi_x
           )
 
 # score the file
-data_recoded[voterfile == 1, y_dem_basicdr := fit_basicDR$Y_train]
-data_recoded[holdout == 1, y_dem_basicdr := fit_basicDR$Y_test]
-
-data_recoded[, .N, .(is.na(y_dem_basicdr))]
+data_recoded[, y_dem_basicdr := fit_basicDR$Y]
 
 calcMSE(Y = data_recoded$y_dem, Y_pred = data_recoded$y_dem_basicdr)
 ```
 
-
+### Plot results
 ```{r}
 
 data_recoded[voterfile == 1 | holdout == 1, y_dem_basicdr_dec := cut(y_dem_basicdr, breaks = quantile(y_dem_basicdr, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
@@ -235,59 +279,251 @@ ggplot(data_recoded[holdout == 1, .(pct_y_dem = mean(y_dem)), by = y_dem_basicdr
   ggtitle("Pct Dem supporter by score decile - holdout")
 ```
 
-Hyperparameter tuning
-```{r}
+## Simple distribution regression with tuned hyperparameters
+
+### Tune hyperparameters
+Use hyperband algorithm described here - https://medium.com/criteo-labs/hyper-parameter-optimization-algorithms-2fe447525903
+
+Main advantage of this method are that it runs multiple iterations with the same parameters (there's still an element of randomness in how the initital centroids are chosen in each k-means run, so this helps with evaluating mean performance of each set of hyperparams).
+
+Disadvantage is that we only consider 64 randomly-selected sets of hyperparameters, which may not fully explore the space enough.  Though the hyperparameters chosen do seem to vastly improve performance over initial (non-tuned) choices.
+
+
+```{r hp-opt, cache = T}
+library(parallel)
+library(MASS)
+
+# takes a while, so don't run by accident/automatically
+if(FALSE){
+  # https://medium.com/criteo-labs/hyper-parameter-optimization-algorithms-2fe447525903
+  n_param_sets = 64
+  results = data.table(sigma = exp(runif(min = -15, max = -1, n = n_param_sets))
+                       , n_landmarks = round(runif(min = 10, max = 400, n = n_param_sets))
+                       , n_bags = round(exp(runif(min = 2, max = 5, n = n_param_sets)))
+                       , round = rep(0, n_param_sets)
+                       , mse = rep(0, n_param_sets)
+                       , mse_count = rep(0, n_param_sets)
+  )
+  #setnames(results, c('sigma','n_landmarks', 'n_bags', 'mse'))
+  
+  #initialize counters
+  which_left = 1:n_param_sets
+  n_iter = 10
+  
+  while(length(which_left) > 1){
+    cat(paste(Sys.time(), "round: ", max(results[, round] + 1)), ', remaining: ',length(which_left),'\n')
+    
+    # double the number of iterations
+    #if(this_round > 3) n_iter = 50
+    
+    for(p in which_left){
+      #cat(paste('\t param:', p, '\n'))
+      
+      # increment round
+      results[p, round := round + 1]
+      
+      mse_sum = unlist(mclapply(1:n_iter, function(i){
+        tryCatch(doBasicDR(data = data_recoded
+                                      , bagging_vars = file_and_survey_vars
+                                      , regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
+                                      #, outcome = 'y_dem'
+                           , outcome = c('y_dem', 'y_rep', 'y_oth')
+                           , family = 'multinomial'
+                                      , n_bags = results[p, n_bags]
+                                      , n_landmarks = results[p, n_landmarks]
+                                      , sigma = results[p, sigma]
+                                      , bagging_ind = 'surveyed'
+                                      , train_ind = 'voterfile'
+                                      , test_ind = 'holdout'
+        )$mse_test
+        , error = function(e) {
+          print(e)
+          return(0)})
+        
+        
+      }, mc.cores = 5  #need this for parallelization
+      ))
+      results[p, mse := mse + sum(mse_sum)]
+      results[p, mse_count := mse_count + sum(mse_sum > 0)]
+    }
+    which_left = which(results[which_left, mse/mse_count < median(mse/mse_count, na.rm = T)])
+    
+  }
+
+
+}
+
+# best
+results[round == max(round)]
+```
+
+
+
+## Fit simple distribution regression with optimal hyperparams
+```{r fit-dr}
 bagging_vars = file_and_survey_vars
 regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
 
+# params from per_hyperparam_opt.R
+fit_basicDR = doBasicDR(data = data_recoded
+                     , bagging_vars = file_and_survey_vars
+                     , regression_vars = regression_vars
+                     , outcome = 'y_dem'
+                     , n_bags = 95
+                     , n_landmarks = 45
+                     , sigma = 0.004
+                     , bagging_ind = 'surveyed'
+                     , train_ind = 'voterfile'
+                     , test_ind = 'holdout')
+```
+
+## Plot results
+```{r}
+
+# get score deciles
+fit_basicDR$data[voterfile == 1 | holdout == 1, y_hat_dec := cut(y_dem_hat, breaks = quantile(y_dem_hat, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
+
+# plot voterfile data
+ggplot(fit_basicDR$data[voterfile == 1, .(pct_y_hat = mean(y_dem_hat)), by = y_hat_dec], aes(x = y_hat_dec, y = pct_y_hat)) +
+  geom_bar(stat = 'identity') +
+  ggtitle("Pct Dem supporter by score decile - voterfile")
+
+# plot holdout data
+ggplot(fit_basicDR$data[holdout == 1, .(pct_y_hat = mean(y_dem_hat)), by = y_hat_dec], aes(x = y_hat_dec, y = pct_y_hat)) + 
+  geom_bar(stat = 'identity') +
+  ggtitle("Pct Dem supporter by score decile - holdout")
+```
+
+
+## Compare to basic LASSO and group average
+
+As a baseline, we'll fit a simple LASSO using only the $n_matched$ observations that were matched to the file.  We fit the LASSO once to find which coefs are non-zero, and then re-fit with only those covars and no penalty to avoid shrinkage.
+
+The other baseline we'll use is the mean in each bag observed in the survey data (matched and unmatched).  This is our dependent variable for the distribution regression.
+
+Fit, predict, and plot results
+```{r basic-lasso}
+
+X_matched = landmarks$X[data_recoded$matched == 1, ]
+lasso_fit = cv.glmnet(x = X_matched
+                      , y = data_recoded[matched == 1, ]$y_dem
+                      , nfolds = 10
+                      , family = 'binomial')
+nonzero_ind = which(coef(lasso_fit, s = 'lambda.min')[-1] != 0)
+
+# re-fit to avoid shrinkage
+lasso_fit = glmnet(x = X_matched[, nonzero_ind]
+                   , y = data_recoded[matched == 1, ]$y_dem
+                   , lambda = 0
+                   , family = 'binomial')
+
+# predict on full dataset
+data_recoded[, y_hat_lasso := predict(lasso_fit, newx = landmarks$X[, nonzero_ind], type = 'response')]
+
+# get score deciles
+data_recoded[holdout == 1, y_hat_lasso_dec := cut(y_hat_lasso, breaks = quantile(y_hat_lasso, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
+
+# plot avg outcome by score decile
+ggplot(data_recoded[holdout == 1, .(pct_y_hat = mean(y_hat_lasso)), by = y_hat_lasso_dec], aes(x = y_hat_lasso_dec, y = pct_y_hat)) + 
+  geom_bar(stat = 'identity') +
+  ggtitle("Pct Dem supporter by score decile - holdout")
+```
+Merge bag average with full file
+```{r}
+data_recoded[Y_svy_bag, on = 'bag', y_bagmean := i.y_mean]
+```
+
+
+Calculate the MSE of each the basic DR and the LASSO
+```{r}
+data.frame(method = c("Dist Reg", "Logit", "Bag mean")
+, MSE = c(calcMSE(Y = data_recoded[holdout == 1, y_dem], data_recoded[holdout == 1, y_dem_hat])
+        , calcMSE(Y = data_recoded[holdout == 1, y_dem], data_recoded[holdout == 1, y_hat_lasso])
+        , calcMSE(Y = data_recoded[holdout == 1, y_dem], data_recoded[holdout == 1, y_bagmean])))
+```
+
+See how well each method is predicting the overall topline % dem support (bias)
+```{r}
+data_recoded[, .(actual = mean(y_dem)
+                 , basicdr = mean(y_dem_hat)
+                 , logit = mean(y_hat_lasso)
+                 , groupavg = mean(y_bagmean, na.rm =T))
+             , by = .(partition = ifelse(holdout == 1, 'holdout', ifelse(voterfile == 1, 'voterfile', ifelse(matched == 1, 'survey-matched', 'survey-unmatched'))))]
+```
+
+## Some observations
+
+* The choice of where variables are observed (survey, file or both) has a large impact on results.  For example, if we observe someone's stated party affiliation at the individual-level in the voterfile, the logit vastly outperforms the distribution regression (ex. MSE 0.08 v. 0.25).  However, if we only observe that variable in the survey, the distribution regresion does almost as well (ex. MSE 0.22 v. 0.25).
+* 
+
+
+## Multinomial Outcome
+
+Now we'll switch to a multinomial outcome $\mathbf{y} = (y_\text{dem}, y_\text{rep}, y_\text{other})$
+
+```{r dr-multinom}
+outcome = c('y_dem', 'y_rep', 'y_oth')
+
+# params from per_hyperparam_opt.R
 fit_basicDR = doBasicDR(data = data_recoded
                      , bagging_vars = file_and_survey_vars
                      , regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
-                     , outcome = 'y_dem'
-                     , n_bags = 75
-                     , n_landmarks = 100
-                     , sigma = 0.01
+                     , outcome = outcome
+                     , n_bags = 131
+                     , n_landmarks = 32
+                     , sigma = 0.006
+                     , family = 'multinomial'
                      , bagging_ind = 'surveyed'
                      , train_ind = 'voterfile'
                      , test_ind = 'holdout')
 
+fit_basicDR$mse_test
 
-names(fit_basicDR)
 ```
 
-
+Calculate group means
 ```{r}
-param_sigma = exp(-seq(1,6, length.out = 10))
-param_nlandmarks = round(exp(seq(2.5, 7, length.out = 10)))
-param_nbags = c(25, 50, 75, 100, 150, 200)
+Y_grp_means = fit_basicDR$data[surveyed == 1, lapply(.SD, mean), .SDcols = outcome, by = bag]
+setnames(Y_grp_means, c('bag',paste0(outcome, '_grpmean')))
+data_recoded = merge(data_recoded, Y_grp_means, by = 'bag', all.x = T)
 
-param_grid = expand.grid(sigma = param_sigma, n_bags = param_nbags, n_landmarks = param_nlandmarks)
-
-grid_search = apply(param_grid, 1, function(p){
-  cat(p)
-  cat('\n')
-  mse = tryCatch(doBasicDR(data = data_recoded
-                     , bagging_vars = file_and_survey_vars
-                     , regression_vars = unique(covars[in_both == 1 | in_file == 1,]$var)
-                     , outcome = 'y_dem'
-                     , n_bags = p[2]
-                     , n_landmarks = p[3]
-                     , sigma = p[1]
-                     , bagging_ind = 'surveyed'
-                     , train_ind = 'voterfile'
-                     , test_ind = 'holdout'
-                  )$mse_test
-                 , error = function(e) return(0))
-  
-  mse
-})
 ```
 
-
-
+Fit multinomial LASSO
 ```{r}
-ggplot(data.table(param_grid, grid_search), aes(x = n_landmarks, y = grid_search)) + geom_point()
+X_matched = landmarks$X[data_recoded$matched == 1, ]
+lasso_fit = cv.glmnet(x = X_matched
+                      , y = as.matrix(data_recoded[matched == 1, which(names(data_recoded) %in% outcome), with = F])
+                      , nfolds = 10
+                      , family = 'multinomial'
+                      )
+nonzero_ind = sort(unique(unlist(lapply(coef(lasso_fit, s = 'lambda.min'), function(c){
+      which(c[-1] != 0)
+    }))))
 
-ggplot(data.table(param_grid, grid_search), aes(x = log(n_landmarks), y = log(sigma))) + geom_tile(aes(fill = -log(grid_search))) + facet_grid(~n_bags)
+if(length(nonzero_ind) == 0){
+  nonzero_ind = 1:ncol(X_matched)
+}
+
+# # re-fit to avoid shrinkage
+lasso_fit = glmnet(x = X_matched[, nonzero_ind]
+                   , y = as.matrix(data_recoded[matched == 1, which(names(data_recoded) %in% outcome), with = F])
+                   , lambda = 0
+                   , family = 'multinomial')
+
+# predict on full dataset
+data_recoded[, c('y_logit_dem', 'y_logit_rep', 'y_logit_oth') := as.list(data.table(matrix(logit_multinom, ncol= 3)))]
+```
+
+Compare the MSEs of the holdout set
+```{r}
+# compare MSE
+data.frame(
+  method = c('Dist Reg', 'Logit','Bag avg')
+  , MSE = c(calcMSE(Y = data_recoded[holdout == 1, get(outcome)], data_recoded[holdout == 1, get(paste0(outcome, '_hat'))])
+            , calcMSE(Y = data_recoded[holdout == 1, get(outcome)], data_recoded[holdout == 1, get(c('y_logit_dem', 'y_logit_rep', 'y_logit_oth'))])
+            , calcMSE(Y = data_recoded[holdout == 1, get(outcome)], data_recoded[holdout == 1, get(c('y_dem_grpmean', 'y_rep_grpmean', 'y_oth_grpmean'))]))
+  )
+
 ```
 
