@@ -202,8 +202,10 @@ doPewRecode = function(data){
   data[, .N, .(qsupport, get(strong_col), get(lean_col))]
   
   data[, y_dem := as.numeric(qsupport == '1-D')]
+  data[, y_rep := as.numeric(qsupport == '2-R')]
+  data[, y_oth := as.numeric(qsupport == '3-O' | qsupport == '4-DK/R')]
   
-  X = data[, grepl('demo_|month_called|y_dem|age', names(data)), with = F]
+  X = data[, grepl('demo_|month_called|y_|age', names(data)), with = F]
   return(X)
 }
 
@@ -271,7 +273,7 @@ getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL){
   
   # make bags
   if(is.null(bags)){
-    bags = kmeans(x = X_bags, centers = n_bags)
+    bags = kmeans(x = X_bags, centers = n_bags, iter.max = 30)
   }
   
   if(!is.null(newdata)){
@@ -292,7 +294,7 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
   X = modmat_all_levs(data = data, formula = modmat_fmla)
   
   # get group definitions with k-means
-  landmarks = kmeans(x = X[subset_ind, ], centers = n_landmarks)
+  landmarks = kmeans(x = X[subset_ind, ], centers = n_landmarks, iter.max = 50)
   landmarks = as.matrix(landmarks$centers)
   
   return(list(landmarks = landmarks, X = X))
@@ -320,55 +322,67 @@ predict.kmeans <- function(object,
 }
 
 
-getFeatures = function(train, train_bag, test, test_bag, landmarks, sigma){
+getFeatures = function(data, bag, train_ind, landmarks, sigma){
   # create kernel
   rbf = rbfdot(sigma = sigma)
   
   # calculate features for train
-  phi_x_train = kernelMatrix(rbf, x = as.matrix(train), y = landmarks)
-  phi_x_train = data.table(bag = train_bag, phi_x_train)
-  setnames(phi_x_train, c('bag', paste0('u', 1:nrow(landmarks))))
-  
-  # calculate for test
-  phi_x_test = kernelMatrix(rbf, x = as.matrix(test), y = landmarks)
-  phi_x_test = data.table(bag = test_bag, phi_x_test)
-  setnames(phi_x_test, c('bag', paste0('u', 1:nrow(landmarks))))
+  phi_x = kernelMatrix(rbf, x = as.matrix(data), y = landmarks)
+  phi_x = data.table(bag = bag, phi_x)
+  setnames(phi_x, c('bag', paste0('u', 1:nrow(landmarks))))
   
   # calculate means of embeddings
-  mu_hat_train = phi_x_train[, lapply(.SD, mean), .SDcols = names(phi_x_train)[-1], by = 'bag'][order(bag)]
+  mu_hat_train = phi_x[train_ind == 1, lapply(.SD, mean), .SDcols = names(phi_x)[-1], by = 'bag'][order(bag)]
   
-  return(list(mu_hat = mu_hat_train, phi_x_train = phi_x_train, phi_x_test = phi_x_test))
+  return(list(mu_hat = mu_hat_train, phi_x = phi_x))
 }
 
-fitLasso = function(mu_hat, Y_bag, phi_x_train = NULL, phi_x_test =  NULL, nfolds = 10){
+fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian'){
   
   # fit once to get non-zero coefs
   # cat(dim(mu_hat))
   # cat('\nY_bag:')
   # cat(length(Y_bag))
   # cat('\n')
-  fit_lambda = cv.glmnet(x = as.matrix(mu_hat[, -1, with = F]), y = Y_bag, nfolds = nfolds)
-  nonzero_ind = which(coef(fit_lambda, s = 'lambda.min') != 0)
   
-  # cat(nonzero_ind)
+  #cap nfolds
+  nfolds = min(3, nfolds)
+  
+  mu_hat_mat = as.matrix(mu_hat[, -1, with = F])
+  
+  fit_lambda = cv.glmnet(x = mu_hat_mat, y = Y_bag, nfolds = nfolds, family = family)
+  if(family == 'gaussian'){
+    nonzero_ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)  # drop intercept term
+  }else{
+    nonzero_ind = sort(unique(unlist(lapply(coef(fit_lambda, s = 'lambda.min'), function(c){
+      which(c[-1] != 0)
+    }))))
+  }
+  
+  # use all vars again if we didn't find any sig ones the first time
+  if(length(nonzero_ind) == 0){
+    nonzero_ind = 1:ncol(mu_hat_mat)
+  }
+  
+  
+  # cat(dim(mu_hat))
   # cat('\n')
+  # cat(dim(mu_hat_mat))
+  # 
+  #  cat(nonzero_ind)
+  #  cat('\n')
   
   # refit to avoid shrinkage
-  fit = glmnet(as.matrix(mu_hat[, nonzero_ind + 1, with = F]), y = Y_bag, lambda = 0)
+  fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family)
   
-  if(!is.null(phi_x_train)){
-    Y_train = predict(fit, newx = as.matrix(phi_x_train[, nonzero_ind + 1, with = F]))
+  if(!is.null(phi_x)){
+    Y_hat = predict(fit, newx = as.matrix(phi_x[, nonzero_ind + 1, with = F]), type = 'response')
   }else{
-    Y_train = NULL
-  }
-  if(!is.null(phi_x_test)){
-    Y_test = predict(fit, newx = as.matrix(phi_x_test[, nonzero_ind + 1, with = F]))
-  }else{
-    Y_test = NULL
+    Y_hat = NULL
   }
   
   
-  return(list(fit = fit, Y_train = Y_train, Y_test = Y_test))
+  return(list(fit = fit, Y_hat = Y_hat))
 }
 
 
@@ -380,6 +394,7 @@ doBasicDR = function(data
                      , n_bags
                      , n_landmarks
                      , sigma
+                     , family = 'gaussian'
                      , bagging_ind = 'surveyed'
                      , train_ind = 'voterfile'
                      , test_ind = 'holdout'
@@ -392,7 +407,10 @@ doBasicDR = function(data
   # cat(sum(data[, get(test_ind)]))
   # cat('\n')
   
+  data[, bag := NULL]
+  
   # Make bags
+  cat(paste0(Sys.time(), "\t Making bags\n"))
   bags = getBags(data = data[get(bagging_ind) == 1,]
                  , vars = bagging_vars
                  , n_bags = n_bags
@@ -402,10 +420,8 @@ doBasicDR = function(data
   data[get(bagging_ind) == 1, bag := bags$bags]
   data[get(train_ind) == 1 | get(test_ind) == 1, bag := bags$bags_newdata]
   
-  # calculate dependent var in each bag
-  Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = mean(get(outcome))), bag][order(bag)]
-  
   # Get landmarks
+  cat(paste0(Sys.time(), "\t Getting landmarks\n"))
   landmarks = getLandmarks(data = data
                            , vars = regression_vars
                            , n_landmarks = n_landmarks
@@ -416,28 +432,56 @@ doBasicDR = function(data
   X_file_holdout = landmarks$X[data[, get(test_ind)] == 1, ]
   
   # get features
-  features = getFeatures(train = X_file
-                         , train_bag = data[get(train_ind) == 1, bag]
-                         , test = X_file_holdout
-                         , test_bag = data[get(test_ind) == 1, bag]
+  cat(paste0(Sys.time(), "\t Making features\n"))
+  features = getFeatures(data = landmarks$X
+                         , bag = as.numeric(data[, bag])
+                         , train_ind = as.numeric(data[, get(train_ind)])
                          , landmarks = landmarks$landmarks
                          , sigma = sigma)
   
+  
+  # prep outcome
+  if(family == 'multinomial'){
+    Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, sum), .SDcols = outcome, by = bag][order(bag)]
+  }else{
+    Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = mean(get(outcome))), bag][order(bag)]
+  }
+  
+  # make sure Y has all bags
+  if(nrow(Y_svy_bag) < n_bags){
+    warning("not all bags in survey\n")
+    Y_svy_bag = merge(data.table(bag = 1:n_bags), Y_svy_bag, all.x = T, by = 'bag')
+    Y_svy_bag[is.na(Y_svy_bag)] <- 0
+  }
+  
+  # drop y obs not in voterfile bags
+  if(nrow(features$mu_hat) != n_bags){
+    warning("not all bags in voterfile\n")
+    Y_svy_bag = Y_svy_bag[-which(!Y_svy_bag$bag %in% features$mu_hat$bag), ]
+  }
+  
+  if(family == 'multinomial'){
+    Y_bag = as.matrix(Y_svy_bag[,-1, with = F])
+  }else{
+    Y_bag = Y_svy_bag$y_mean
+  }
+  
+  cat(paste0(Sys.time(), "\t Fitting model\n"))
+  
   # do basic DR
   fit = fitLasso(mu_hat = features$mu_hat
-                 , Y_bag = Y_svy_bag$y_mean
-                 , phi_x_train = features$phi_x_train
-                 , phi_x_test = features$phi_x_test
-  )
+                 , Y_bag = Y_bag
+                 , phi_x = features$phi_x
+                 , family = family
+                 )
   
   # score the file
-  data[get(train_ind) == 1, y_hat := fit$Y_train]
-  data[get(test_ind) == 1, y_hat := fit$Y_test]
+  data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
   
   # calculate mse
-  mse_test = calcMSE(Y = as.numeric(data[get(test_ind) == 1, get(outcome)])
-                     , Y_pred = as.numeric(data[get(test_ind) == 1, y_hat]))
+  mse_test = calcMSE(Y = as.numeric(unlist(data[get(test_ind) == 1, which(names(data) %in% outcome), with = F]))
+                     , Y_pred = as.numeric(unlist(data[get(test_ind) == 1, which(names(data) %in% paste0(outcome, '_hat')), with = F])))
   
-  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = data$y_hat, mse_test = mse_test))
+  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = data[, which(names(data) %in% paste0(outcome, '_hat')), with = F], mse_test = mse_test))
 }
 
