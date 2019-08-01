@@ -67,6 +67,7 @@ file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_inco
 ```{r, message = F, warning=F}
 # RECODE all data sets
 data_recoded = rbindlist(lapply(list(data_sept18, data_may18, data_june18), doPewRecode))
+# write.csv(data_recoded, file = 'data/pew_recoded.csv', row.names = F)
 
 data_recoded
 ```
