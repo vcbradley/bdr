@@ -1,6 +1,8 @@
 ---
 title: "BDR with Pew Data"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -354,12 +356,12 @@ if(FALSE){
     which_left = which(results[which_left, mse/mse_count < median(mse/mse_count, na.rm = T)])
     
   }
-
+# best
+results[round == max(round)][order(mse)]
 
 }
 
-# best
-results[round == max(round)][order(mse)]
+
 ```
 
 
