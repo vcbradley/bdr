@@ -4,7 +4,7 @@ output: html_notebook
 ---
 
 
-```{r set-up}
+```{r set-up, echo = F, message = F}
 rm(list = ls())
 library(data.table)
 library(foreign)
@@ -16,6 +16,11 @@ library(glmnet)
 library(caret)
 #library(plot3D)
 library(memisc) #cases
+
+# for parallelizing cv.glmnet
+library(doMC)
+registerDoMC(cores = 4) 
+
 setwd('~/github/bdr/')
 
 source('functions.R')
@@ -97,8 +102,8 @@ We also want to mirror real conditions, in that the survey data is not selected 
 
 Generally, those who respond to surveys tend to be older, unemployed/retired/disabled, partisan, more educated, have white collar jobs and reached on cell phones.  We are more likely to be able to match someone to the voterfile if they are higher income (more consumer data available on them), reached on a cell-phone, older, white, live in a smaller household.  These trends are reflected in the formula for $p_\text{missing}$ and $p_{matched}$ specified below.
 
-### Proability of surveyed
-```{r}
+### Proability of being surveyed
+```{r prob-svyd}
 # scale age and set NAs to 0
 data_recoded[, age_scaled := scale(age_num)]
 data_recoded[is.na(age_scaled), age_scaled := 0]
@@ -122,8 +127,8 @@ data_recoded[, .(.N, mean(p_surveyed)), .(demo_party)][order(demo_party)]
 data_recoded[, .(.N, mean(p_surveyed)), .(demo_ideology)][order(demo_ideology)]
 ```
 
-### Probability of matched
-```{r}
+### Probability of being matched
+```{r prob-matched}
 data_recoded[, p_matched := NULL]
 data_recoded[, p_matched :=
                -2 +
@@ -193,7 +198,7 @@ These steps are implemented below.
 * Should I switch from LASSO to cv-chosen $\alpha$?
 
 #### Assign bags
-```{r}
+```{r get-bags}
 #### Create bags of survey responses using variables observed in BOTH survey AND voterfile
 # should we make the bags with the subset of data from the survey, or the whole file???
 
@@ -215,7 +220,7 @@ data_recoded[, .(.N, mean(surveyed)), .(bag)][order(bag)]
 ```
 
 #### Get landmark points
-```{r}
+```{r get-landmarks}
 landmarks = getLandmarks(data = data_recoded
              , vars = unique(covars[in_both == 1 | in_file == 1,]$var)
              , n_landmarks = n_landmarks
@@ -228,7 +233,7 @@ X_file = landmarks$X[data_recoded$voterfile == 1, ]
 #### Embed file in feature space
 
 Choose scale parameter $\sigma$ for RBF kernel - use median heuristic for now
-```{r}
+```{r get-features}
 rbf1 = rbfdot(sigma = 1)
 K_sigma = kernelMatrix(rbf1, x = as.matrix(X_file), y = landmarks$landmarks)
 sigma = median(K_sigma)
@@ -245,7 +250,7 @@ features = getFeatures(data = landmarks$X
 ```
 
 #### Fit LASSO using mean feature embeddings
-```{r}
+```{r get-lasso}
 # calculate dependent var in each bag
 Y_svy_bag = data_recoded[surveyed == 1, .(y_mean = mean(y_dem)), bag][order(bag)]
 # make sure Y has all levels
@@ -267,7 +272,7 @@ calcMSE(Y = data_recoded$y_dem, Y_pred = data_recoded$y_dem_basicdr)
 ```
 
 ### Plot results
-```{r}
+```{r step-by-step-results}
 
 data_recoded[voterfile == 1 | holdout == 1, y_dem_basicdr_dec := cut(y_dem_basicdr, breaks = quantile(y_dem_basicdr, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T)]
 
@@ -354,7 +359,7 @@ if(FALSE){
 }
 
 # best
-results[round == max(round)]
+results[round == max(round)][order(mse)]
 ```
 
 
@@ -435,7 +440,7 @@ data_recoded[Y_svy_bag, on = 'bag', y_bagmean := i.y_mean]
 
 
 Calculate the MSE of each the basic DR and the LASSO
-```{r}
+```{r basic-mse}
 data.frame(method = c("Dist Reg", "Logit", "Bag mean")
 , MSE = c(calcMSE(Y = data_recoded[holdout == 1, y_dem], data_recoded[holdout == 1, y_dem_hat])
         , calcMSE(Y = data_recoded[holdout == 1, y_dem], data_recoded[holdout == 1, y_hat_lasso])
@@ -443,7 +448,7 @@ data.frame(method = c("Dist Reg", "Logit", "Bag mean")
 ```
 
 See how well each method is predicting the overall topline % dem support (bias)
-```{r}
+```{r basic-topline}
 data_recoded[, .(actual = mean(y_dem)
                  , basicdr = mean(y_dem_hat)
                  , logit = mean(y_hat_lasso)
@@ -454,6 +459,7 @@ data_recoded[, .(actual = mean(y_dem)
 ## Some observations
 
 * The choice of where variables are observed (survey, file or both) has a large impact on results.  For example, if we observe someone's stated party affiliation at the individual-level in the voterfile, the logit vastly outperforms the distribution regression (ex. MSE 0.08 v. 0.25).  However, if we only observe that variable in the survey, the distribution regresion does almost as well (ex. MSE 0.22 v. 0.25).
+* LASSO doesn't always select significant predictors - matched set too small for fair comparison?  Worth trying separate logits for each outcome?
 * 
 
 
@@ -481,42 +487,53 @@ fit_basicDR$mse_test
 
 ```
 
-Calculate group means
-```{r}
+### Calculate group means
+
+Multinomial group means for comparison
+
+```{r multi-grpmean}
 Y_grp_means = fit_basicDR$data[surveyed == 1, lapply(.SD, mean), .SDcols = outcome, by = bag]
 setnames(Y_grp_means, c('bag',paste0(outcome, '_grpmean')))
 data_recoded = merge(data_recoded, Y_grp_means, by = 'bag', all.x = T)
-
 ```
 
-Fit multinomial LASSO
-```{r}
+
+### Fit multinomial LASSO
+```{r, multi-lasso}
 X_matched = landmarks$X[data_recoded$matched == 1, ]
-lasso_fit = cv.glmnet(x = X_matched
+logit_multinom = cv.glmnet(x = X_matched
                       , y = as.matrix(data_recoded[matched == 1, which(names(data_recoded) %in% outcome), with = F])
-                      , nfolds = 10
+                      #, nfolds = 10
                       , family = 'multinomial'
+                      #, alpha = 0.2
+                      , parallel = T
                       )
-nonzero_ind = sort(unique(unlist(lapply(coef(lasso_fit, s = 'lambda.min'), function(c){
+nonzero_ind = sort(unique(unlist(lapply(coef(logit_multinom, s = 'lambda.min'), function(c){
       which(c[-1] != 0)
     }))))
 
+cat(nonzero_ind)
+
 if(length(nonzero_ind) == 0){
-  nonzero_ind = 1:ncol(X_matched)
+  nonzero_ind = 1
+  nonzero_ind = 1:10
 }
 
 # # re-fit to avoid shrinkage
-lasso_fit = glmnet(x = X_matched[, nonzero_ind]
+logit_multinom = glmnet(x = X_matched[, nonzero_ind]
                    , y = as.matrix(data_recoded[matched == 1, which(names(data_recoded) %in% outcome), with = F])
                    , lambda = 0
                    , family = 'multinomial')
 
 # predict on full dataset
-data_recoded[, c('y_logit_dem', 'y_logit_rep', 'y_logit_oth') := as.list(data.table(matrix(logit_multinom, ncol= 3)))]
-```
+data_recoded[, c('y_logit_dem', 'y_logit_rep', 'y_logit_oth') := as.list(data.table(matrix(predict(logit_multinom, newx = landmarks$X[, nonzero_ind], type = 'response'), ncol= 3)))]
 
-Compare the MSEs of the holdout set
-```{r}
+head(data_recoded[, c('y_logit_dem', 'y_logit_rep', 'y_logit_oth')])
+```
+ 
+
+### Compare the MSEs of the predictions on the holdout set
+```{r multi-mse}
 # compare MSE
 data.frame(
   method = c('Dist Reg', 'Logit','Bag avg')
