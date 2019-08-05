@@ -231,7 +231,7 @@ getTestTrain = function(data, n_holdout, n_surveyed, n_matched, p_surveyed = NUL
     p_surveyed = rep(1/nrow(data), n = nrow(data))
   }
   if(is.null(p_matched)){
-    p_surveyed = rep(1/n_surveyed, n = n_surveyed)
+    p_matched = rep(1/n_surveyed, n = nrow(data))
   }
   
   # holdout set
@@ -266,25 +266,141 @@ getTestTrain = function(data, n_holdout, n_surveyed, n_matched, p_surveyed = NUL
 }
 
 
-getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL){
+
+# function fixed from LICORS package
+kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10, 
+                    ...){
+  kk <- k
+  if (length(dim(data)) == 0) {
+    data <- matrix(data, ncol = 1)
+  }
+  else {
+    data <- cbind(data)
+  }
+  num.samples <- nrow(data)
+  ndim <- ncol(data)
+  data.avg <- colMeans(data)
+  data.cov <- cov(data)
+  out <- list()
+  out$tot.withinss <- Inf
+  for (restart in seq_len(nstart)) {
+    center_ids <- rep(0, length = kk)
+    if (start == "random") {
+      center_ids[1:2] = sample.int(num.samples, 1)
+    }
+    else if (start == "normal") {
+      center_ids[1:2] = which.min(dmvnorm(data, mean = data.avg, 
+                                          sigma = data.cov))
+    }
+    else {
+      center_ids[1:2] = start
+    }
+    for (ii in 2:kk) {
+      dists <- dista(x = data, xnew = data[center_ids, ], square = TRUE)
+      probs <- apply(dists, 2, min)
+      # if (ndim == 1) {
+      #   dists <- apply(cbind(data[center_ids, ]), 1, 
+      #                  function(center) {
+      #                    
+      #                    colSums(apply(data, 1, function(x) (x - center)^2))  #line changed to correctly calc distance
+      #                  })
+      # }
+      # else {
+      #   dists <- apply(data[center_ids, ], 1, function(center) {
+      #     colSums(apply(data, 1, function(x) (x - center)^2))  #line changed to correctly calc distance
+      #   })
+      # }
+      # probs <- apply(dists, 1, min)
+      probs[center_ids] <- 0
+      #center_ids[ii] <- sample.int(num.samples, 1, prob = probs)
+      center_ids[ii] <- sample(c(1:num.samples)[probs > 0], prob = probs[probs > 0], size = 1)
+    }
+    cat(paste('n unique: ', nrow(unique(data[center_ids, ]))))
+    cat('\n')
+    
+    tmp.out <- kmeans(data, centers = data[center_ids, ], 
+                      iter.max = iter.max, ...)
+    tmp.out$inicial.centers <- data[center_ids, ]
+    if (tmp.out$tot.withinss < out$tot.withinss) {
+      out <- tmp.out
+    }
+  }
+  invisible(out)
+}
+
+
+
+getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL, max_attempts = 20){
   # get modmats
   bags_modmat_fmla = as.formula(paste('~', paste(file_and_survey_vars, collapse = '+')))
-  X_bags = modmat_all_levs(data = data, formula = bags_modmat_fmla)
+  X = modmat_all_levs(data = data, formula = bags_modmat_fmla)
   
   # make bags
   if(is.null(bags)){
-    bags = kmeans(x = X_bags, centers = n_bags, iter.max = 30)
+    # get bags with k-means++ - wrapper so that it re-initializes if it fails the first time
+    #running_landmarks = TRUE
+    bags = simpleError('start')
+    counter = 1
+    
+    while('error' %in% class(bags) & counter <= max_attempts){
+      start = sample.int(nrow(X), size = 1)
+      cat(paste0("attempt ", counter, ": ", start, "\n"))
+      
+      bags = tryCatch({
+        kmeanspp(data = X, k = n_bags, start = start)  # if running landmarks, we just need the initial points
+      }, error = function(e){
+        cat(paste(e))
+        return(e)
+      })
+      
+      counter = counter + 1
+    }
   }
   
   if(!is.null(newdata)){
-    X_bags_file = modmat_all_levs(data = newdata, formula = bags_modmat_fmla)
-    bags_newdata = predict.kmeans(object = bags, newdata = X_bags_file, method = 'classes')
+    X_new = modmat_all_levs(data = newdata, formula = bags_modmat_fmla)
+    bags_newdata = predict.kmeans(object = bags, newdata = X_new, method = 'classes')
   }else{
     bags_newdata = NULL
   }
   
-  return(list(bags = bags$cluster, bags_newdata = bags_newdata))
+  return(list(bag_fit = bags, bags_newdata = bags_newdata))
 }
+
+
+
+
+
+#### Code implementing kmeans++ initialization manually
+# 
+# n_bags = 30
+# centers = rep(NA, n_bags)
+# centers[1] = sample.int(n = nrow(X), size = 1)
+# 
+# d = as.matrix(dist(X))
+# dim(d)
+# 
+# head(d)
+# 
+# for(i in 2:n_bags){
+#   last = i - 1
+#   points_left = c(1:nrow(X))[-centers[1:last]]
+#   if(i == 2){
+#     min_dist = d[centers[1:last], points_left]
+#   }else{
+#     min_dist = apply(d[centers[1:last], points_left], 2, min)
+#   }
+# 
+#   centers[i] = sample(points_left
+#                       , prob = min_dist^2  #choose proportionally to
+#                       , size = 1)
+# }
+# 
+# nrow(unique(X[centers,]))
+# 
+# which(apply(X, 1, function(x) identical(x, X[40,])))
+# 
+# which(d[40,] == 0)
 
 
 getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
