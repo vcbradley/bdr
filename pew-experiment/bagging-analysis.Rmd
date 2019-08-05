@@ -1,0 +1,121 @@
+---
+title: "Bagging Analysis"
+output: html_notebook
+---
+
+This notebook examines the robustness of `k-means++` for creating bags for distribution regression, and compares bags created with all observations in a voterfile v. just those observed in a survey.
+
+```{r set-up, echo = F, message = F}
+library(data.table)
+library(entropy)
+library(gridExtra)
+library(ggplot2)
+library(Rfast)
+
+setwd('~/github/bdr')
+
+source('functions.R') # contains the key functions for basic dist reg
+```
+
+## Read in data, set parameters.  
+
+Bagging will only use variables observed both in the voterfile and the survey.
+```{r set-parameters}
+survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology', 'demo_party')
+file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
+
+# read in *recoded* data
+pew_data = fread('data/pew_data.csv')
+
+# set n_bags
+n_bags = 30
+```
+
+## get test train sets
+```{r test-train}
+testtrain = getTestTrain(data = pew_data
+                         , n_holdout = 1000, n_surveyed = 2000, n_matched = 1000
+                         , p_surveyed = pew_data$p_surveyed
+                         , p_matched = pew_data$p_matched
+)
+pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
+```
+
+## Run simulation
+
+Run `k-means++` 50 times to generate bags using each 1) all the voterfile observations and 2) just the survey data.
+
+```{r bagging}
+bag_iter = 50
+bag_svy_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
+bag_all_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
+
+for(i in 1:bag_iter){
+  cat(paste(i, '\n'))
+  bag_svy_mat[,i] = getBags(data = pew_data[surveyed == 1, ]
+                         , vars = file_and_survey_vars
+                         , n_bags = n_bags
+                         , newdata = pew_data)$bags_newdata
+  bag_all_mat[,i] = getBags(data = pew_data[holdout == 0, ]
+                     , vars = file_and_survey_vars
+                     , n_bags = n_bags
+                     , newdata = pew_data)$bags_newdata
+  
+}
+
+bag_svy_mat = melt(bag_svy_mat, varnames = c('id', 'iter'), value.name = 'bag_svy')
+bag_all_mat = melt(bag_all_mat, varnames = c('id', 'iter'), value.name = 'bag_all')
+bag_mat = data.table(merge(bag_svy_mat, bag_all_mat, by = c('id','iter')))
+```
+
+
+## Bag size
+
+We want to know if generating bags based on just the survey data leads to imbalances in bag size when bags are assigned to the full voterfile, and vice-versa.  We see that the distribution of bag sizes for the whole voterfile is consistent across data used to generate the bags.  However, when we look at the distrbution of bag sizes within just the observations that were surveyed, we see less variability in bag size when the bags are generated with just the survey data than with the full voterfile.
+
+```{r }
+plot_bagsize_all = ggplot() + 
+  geom_density(aes(bag_mat[, .(.N), .(bag_svy, iter)]$N, color = 'bagged with survey')) +
+  geom_density(aes(bag_mat[, .(.N), .(bag_all, iter)]$N, color = 'bagged with all data')) +
+  xlab("Bag Size") +
+  ggtitle("Dist of bag size - full voterfile")
+
+plot_bagsize_svy = ggplot() + 
+  geom_density(aes(bag_mat[id %in% pew_data[, which(surveyed == 1)], .(.N), .(bag_svy, iter)]$N, color = 'bagged with survey')) +
+  geom_density(aes(bag_mat[id %in% pew_data[, which(surveyed == 1)], .(.N), .(bag_all, iter)]$N, color = 'bagged with all data')) +
+  xlab("Bag Size") +
+  ggtitle("Dist of bag size - survey only")
+
+grid.arrange(plot_bagsize_all, plot_bagsize_svy)
+```
+
+## Empty bags
+
+We also want to make sure that when we're generating bags with the voterfile data, those bags aren't empty in the survey data (which would leave us without an estimate of the outcome in that bag).  Simlarly, when we generate the bags with just the survey data, we want to make sure that no bags are missing from the voterfile data, which would force us to throw away outcome data.
+
+None of the bags are missing observations, no matter which data is used to generate the bags
+
+```{r}
+bag_mat[id %in% pew_data[, which(surveyed == 1)], .(length(unique(bag_svy)), length(unique(bag_all))), iter][, .(min_bag_svy = min(V1), min_bag_all = min(V2))]
+```
+
+
+#### Bag similarity - LOTS of overlap
+```{r}
+bag_mat[, iter_bag_svy := interaction(iter, bag_svy)]
+bag_mat[, iter_bag_all := interaction(iter, bag_all)]
+
+bag_svy_overlap = merge(bag_mat, bag_mat, by = 'iter_bag_svy', allow.cartesian=TRUE)[, .N, by = .(id.x,id.y)]
+bag_all_overlap = merge(bag_mat, bag_mat, by = 'iter_bag_all', allow.cartesian=TRUE)[, .N, by = .(id.x,id.y)]
+
+ggplot() + 
+  geom_density(data = bag_svy_overlap[id.x != id.y,], aes(x = N, color = 'svy')) +
+  geom_density(data = bag_all_overlap[id.x != id.y,], aes(x = N, color = 'all')) +
+  ggtitle("Bag overlap") +
+  xlab("Number of overlaps")
+```
+
+
+
+
+
