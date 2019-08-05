@@ -19,7 +19,6 @@ source('functions.R') # contains the key functions for basic dist reg
 
 ## Read in data, set parameters.  
 
-Bagging will only use variables observed both in the voterfile and the survey.
 ```{r set-parameters}
 survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology', 'demo_party')
 file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
@@ -41,7 +40,10 @@ testtrain = getTestTrain(data = pew_data
 pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 ```
 
-## Run simulation
+
+## What data - survey or full file?
+
+### Run simulation
 
 Run `k-means++` 50 times to generate bags using each 1) all the voterfile observations and 2) just the survey data.
 
@@ -69,7 +71,7 @@ bag_mat = data.table(merge(bag_svy_mat, bag_all_mat, by = c('id','iter')))
 ```
 
 
-## Bag size
+### Bag size
 
 We want to know if generating bags based on just the survey data leads to imbalances in bag size when bags are assigned to the full voterfile, and vice-versa.  We see that the distribution of bag sizes for the whole voterfile is consistent across data used to generate the bags.  However, when we look at the distrbution of bag sizes within just the observations that were surveyed, we see less variability in bag size when the bags are generated with just the survey data than with the full voterfile.
 
@@ -89,7 +91,7 @@ plot_bagsize_svy = ggplot() +
 grid.arrange(plot_bagsize_all, plot_bagsize_svy)
 ```
 
-## Empty bags
+### Empty bags
 
 We also want to make sure that when we're generating bags with the voterfile data, those bags aren't empty in the survey data (which would leave us without an estimate of the outcome in that bag).  Simlarly, when we generate the bags with just the survey data, we want to make sure that no bags are missing from the voterfile data, which would force us to throw away outcome data.
 
@@ -100,7 +102,7 @@ bag_mat[id %in% pew_data[, which(surveyed == 1)], .(length(unique(bag_svy)), len
 ```
 
 
-#### Bag similarity - LOTS of overlap
+### Bag similarity - LOTS of overlap
 ```{r}
 bag_mat[, iter_bag_svy := interaction(iter, bag_svy)]
 bag_mat[, iter_bag_all := interaction(iter, bag_all)]
@@ -117,5 +119,64 @@ ggplot() +
 
 
 
+## Which variables
+
+### Run simulation
+
+Run `k-means++` 50 times to generate bags using each 1) all the voterfile observations and 2) just the survey data.
+
+```{r bagging-vars}
+bag_iter = 50
+bag_allvars_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
+bag_svyvars_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
+
+
+for(i in 1:bag_iter){
+  cat(paste(i, '\n'))
+  
+  ### VERSION 1 - ALL VARS
+  bags_temp = getBags(data = pew_data[surveyed == 1, ]
+                         , vars = c(survey_vars, file_and_survey_vars)
+                         , n_bags = n_bags)
+  
+  # get cols of just the overlapping vars
+  modmat_fmla = as.formula(paste('~', paste(file_and_survey_vars, collapse = '+')))
+  X = modmat_all_levs(data = pew_data, formula = modmat_fmla)
+  
+  #limit centers to just those cols
+  bags_temp$bag_fit$centers = bags_temp$bag_fit$centers[, which(colnames(bags_temp$bag_fit$centers) %in% colnames(X))]
+  
+  # fit bags with limited centers
+  bag_allvars_mat[, i] = getBags(bags = bags_temp$bag_fit, vars = file_and_survey_vars, newdata = pew_data)$bags_newdata
+  
+  ### VERSION 2 - just overlapping vars
+  bag_svyvars_mat[, i] = getBags(data = pew_data[surveyed == 1, ]
+                         , vars = file_and_survey_vars
+                         , n_bags = n_bags
+                         , newdata = pew_data)$bags_newdata
+}
+
+bag_svyvars_mat_v2 = melt(bag_svyvars_mat, varnames = c('id', 'iter'), value.name = 'bag_overlaponly')
+bag_allvars_mat_v2 = melt(bag_allvars_mat, varnames = c('id', 'iter'), value.name = 'bag_allvars')
+bag_vars_mat = data.table(merge(bag_svyvars_mat_v2, bag_allvars_mat_v2, by = c('id','iter')))
+```
+
+
+
+```{r }
+plot_bagsize_vars_all = ggplot() + 
+  geom_density(aes(bag_vars_mat[, .(.N), .(bag_overlaponly, iter)]$N, color = 'bagged with only overlapping vars')) +
+  geom_density(aes(bag_vars_mat[, .(.N), .(bag_allvars, iter)]$N, color = 'bagged with all vars')) +
+  xlab("Bag Size") +
+  ggtitle("Dist of bag size - full voterfile")
+
+plot_bagsize_vars_svy = ggplot() + 
+  geom_density(aes(bag_vars_mat[id %in% pew_data[, which(surveyed == 1)], .(.N), .(bag_overlaponly, iter)]$N, color = 'bagged with onlyoverlapping vars')) +
+  geom_density(aes(bag_vars_mat[id %in% pew_data[, which(surveyed == 1)], .(.N), .(bag_allvars, iter)]$N, color = 'bagged with all vars')) +
+  xlab("Bag Size") +
+  ggtitle("Dist of bag size - survey only")
+
+grid.arrange(plot_bagsize_vars_all, plot_bagsize_vars_svy)
+```
 
 
