@@ -371,8 +371,8 @@ getBags = function(data = NULL, vars, n_bags = NULL, newdata = NULL, bags = NULL
     # modify bags - drop vars not in new data
     bags$centers_full = bags$centers
     
-    bag_vars_new = which(names(bags$centers) %in% names(X_new))
-    bags$centers = bags$centers[bag_vars_new]
+    bag_vars_new = which(colnames(bags$centers) %in% colnames(X_new))
+    bags$centers = bags$centers[, bag_vars_new]
     
     bags_newdata = predict.kmeans(object = bags, newdata = X_new, method = 'classes')
   }else{
@@ -528,7 +528,8 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
 
 
 doBasicDR = function(data
-                     , bagging_vars
+                     , make_bags_vars
+                     , score_bags_vars
                      , regression_vars
                      , outcome
                      , n_bags
@@ -555,9 +556,9 @@ doBasicDR = function(data
   # Make bags
   cat(paste0(Sys.time(), "\t Making bags\n"))
   bags = getBags(data = data[get(bagging_ind) == 1,]
-                 , vars = bagging_vars
+                 , vars = make_bags_vars
                  , n_bags = n_bags
-                 , newdata = data)
+                 , newdata = data[, score_bags_vars, with = F])
   
   # assign data to bags
   data[, bag := bags$bags_newdata]
