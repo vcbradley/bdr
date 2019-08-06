@@ -260,7 +260,7 @@ getTestTrain = function(data, n_holdout, n_surveyed, n_matched, p_surveyed = NUL
     data[, matched := 1]
   }
   
-  data[, voterfile := ifelse(holdout == 0 & surveyed == 0, 1, 0)]
+  data[, voterfile := ifelse(holdout == 1 | (surveyed == 1 & matched == 0), 0, 1)]
   
   return(list(data = data, holdout_ind = holdout_ind, survey_ind = survey_ind, matched_ind = matched_ind))
 }
@@ -315,8 +315,8 @@ kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10,
       #center_ids[ii] <- sample.int(num.samples, 1, prob = probs)
       center_ids[ii] <- sample(c(1:num.samples)[probs > 0], prob = probs[probs > 0], size = 1)
     }
-    cat(paste('n unique: ', nrow(unique(data[center_ids, ]))))
-    cat('\n')
+    #cat(paste('n unique: ', nrow(unique(data[center_ids, ]))))
+    #cat('\n')
     
     tmp.out <- kmeans(data, centers = data[center_ids, ], 
                       iter.max = iter.max, ...)
@@ -330,10 +330,13 @@ kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10,
 
 
 
-getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL, max_attempts = 20){
+getBags = function(data = NULL, vars, n_bags = NULL, newdata = NULL, bags = NULL, max_attempts = 20){
   # get modmats
-  bags_modmat_fmla = as.formula(paste('~', paste(file_and_survey_vars, collapse = '+')))
-  X = modmat_all_levs(data = data, formula = bags_modmat_fmla)
+  bags_modmat_fmla = as.formula(paste('~', paste(vars, collapse = '+')))
+  if(!is.null(data)){
+    X = modmat_all_levs(data = data, formula = bags_modmat_fmla)
+  }
+  
   
   # make bags
   if(is.null(bags)){
@@ -344,7 +347,7 @@ getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL, max_attempts
     
     while('error' %in% class(bags) & counter <= max_attempts){
       start = sample.int(nrow(X), size = 1)
-      cat(paste0("attempt ", counter, ": ", start, "\n"))
+      #cat(paste0("attempt ", counter, ": ", start, "\n"))
       
       bags = tryCatch({
         kmeanspp(data = X, k = n_bags, start = start)  # if running landmarks, we just need the initial points
@@ -358,7 +361,19 @@ getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL, max_attempts
   }
   
   if(!is.null(newdata)){
-    X_new = modmat_all_levs(data = newdata, formula = bags_modmat_fmla)
+    # drop variables that we don't have in new data
+    vars_new = vars[vars %in% names(newdata)]
+    bags_modmat_fmla_new = as.formula(paste('~', paste(vars_new, collapse = '+')))
+    
+    # create new modmat
+    X_new = modmat_all_levs(data = newdata, formula = bags_modmat_fmla_new)
+    
+    # modify bags - drop vars not in new data
+    bags$centers_full = bags$centers
+    
+    bag_vars_new = which(names(bags$centers) %in% names(X_new))
+    bags$centers = bags$centers[bag_vars_new]
+    
     bags_newdata = predict.kmeans(object = bags, newdata = X_new, method = 'classes')
   }else{
     bags_newdata = NULL
@@ -404,15 +419,20 @@ getBags = function(data, vars, n_bags, newdata = NULL, bags = NULL, max_attempts
 
 
 getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
+  require(tictoc)
+  
+  tic("getting landmarks")
+  
   modmat_fmla = as.formula(paste('~', paste(vars, collapse = '+')))
   
   # make one modmat so we get all columns in all subsets
   X = modmat_all_levs(data = data, formula = modmat_fmla)
   
   # get group definitions with k-means
-  landmarks = kmeans(x = X[subset_ind, ], centers = n_landmarks, iter.max = 50)
-  landmarks = as.matrix(landmarks$centers)
+  landmarks = kmeanspp(data = X[subset_ind, ], k = n_landmarks, iter.max = 1)
+  landmarks = as.matrix(landmarks$inicial.centers)
   
+  toc()
   return(list(landmarks = landmarks, X = X))
 }
 
@@ -464,7 +484,11 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
   #cap nfolds
   nfolds = min(3, nfolds)
   
-  mu_hat_mat = as.matrix(mu_hat[, -1, with = F])
+  if('data.table' %in% class(mu_hat)){
+    mu_hat_mat = as.matrix(mu_hat[, -1, with = F]) # drop bags col
+  }else{
+    mu_hat_mat = mu_hat
+  }
   
   fit_lambda = cv.glmnet(x = mu_hat_mat, y = Y_bag, nfolds = nfolds, family = family)
   if(family == 'gaussian'){
@@ -492,7 +516,7 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
   fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family)
   
   if(!is.null(phi_x)){
-    Y_hat = predict(fit, newx = as.matrix(phi_x[, nonzero_ind + 1, with = F]), type = 'response')
+    Y_hat = predict(fit, newx = as.matrix(phi_x)[, nonzero_ind], type = 'response')
   }else{
     Y_hat = NULL
   }
@@ -516,6 +540,9 @@ doBasicDR = function(data
                      , test_ind = 'holdout'
 ){
   
+  require(glmnet)
+  require(kernlab)
+  
   # cat(sum(data[, get(bagging_ind)]))
   # cat('\n')
   # cat(sum(data[, get(train_ind)]))
@@ -530,11 +557,10 @@ doBasicDR = function(data
   bags = getBags(data = data[get(bagging_ind) == 1,]
                  , vars = bagging_vars
                  , n_bags = n_bags
-                 , newdata = data[get(train_ind) == 1 | get(test_ind) == 1, ])
+                 , newdata = data)
   
   # assign data to bags
-  data[get(bagging_ind) == 1, bag := bags$bags]
-  data[get(train_ind) == 1 | get(test_ind) == 1, bag := bags$bags_newdata]
+  data[, bag := bags$bags_newdata]
   
   # Get landmarks
   cat(paste0(Sys.time(), "\t Getting landmarks\n"))
@@ -587,7 +613,7 @@ doBasicDR = function(data
   # do basic DR
   fit = fitLasso(mu_hat = features$mu_hat
                  , Y_bag = Y_bag
-                 , phi_x = features$phi_x
+                 , phi_x = features$phi_x[, -1]
                  , family = family
                  )
   
@@ -601,3 +627,24 @@ doBasicDR = function(data
   return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = data[, which(names(data) %in% paste0(outcome, '_hat')), with = F], mse_test = mse_test))
 }
 
+
+
+doDecilePlot = function(data, score_name, title = NULL){
+  # get score deciles
+  pew_data[, paste0(score_name, '_dec') := cut(get(score_name)
+                                               , breaks = quantile(get(score_name), probs = seq(0,1,0.1)) + (c(0:10) * .Machine$double.eps)  # add jitter
+                                               , labels = 1:10, include.lowest = T)]
+  
+  # plot avg outcome by score decile
+  plot = ggplot(pew_data[, .(pct_outcome = mean(get(score_name))), by = get(paste0(score_name, '_dec'))]
+         , aes(x = get, y = pct_outcome)) + 
+    geom_bar(stat = 'identity') +
+    xlab("score decile") + ylab(paste0("avg ", score_name)) +
+    ylim(0, 1)
+
+  if(!is.null(title)){
+    plot = plot + ggtitle(title)
+  }
+    
+  return(plot)
+}
