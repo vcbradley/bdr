@@ -162,7 +162,7 @@ bag_vars_mat = data.table(merge(bag_svyvars_mat_v2, bag_allvars_mat_v2, by = c('
 ```
 
 
-
+### Distribution of bag sizes
 ```{r }
 plot_bagsize_vars_all = ggplot() + 
   geom_density(aes(bag_vars_mat[, .(.N), .(bag_overlaponly, iter)]$N, color = 'bagged with only overlapping vars')) +
@@ -177,6 +177,13 @@ plot_bagsize_vars_svy = ggplot() +
   ggtitle("Dist of bag size - survey only")
 
 grid.arrange(plot_bagsize_vars_all, plot_bagsize_vars_svy)
+```
+
+### Empty bags
+When we use all the variables, there are empty bags in the survey data
+
+```{r}
+bag_vars_mat[, .(length(unique(bag_overlaponly)), length(unique(bag_allvars))), iter][, .(min_bag_svy = min(V1), min_bag_all = min(V2))]
 ```
 
 
