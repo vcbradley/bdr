@@ -649,3 +649,62 @@ doDecilePlot = function(data, score_name, title = NULL){
     
   return(plot)
 }
+
+
+
+doKMM = function(X_trn, X_tst, B = 1, sigma = 1, kernel_type = 'rbf'){
+  n_trn = nrow(X_trn)
+  n_tst = nrow(X_tst)
+  
+  eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
+  
+  # use RBF kernel for now
+  rbf1 = rbfdot(sigma = sigma)
+  K = kernelMatrix(rbf1, x = X_trn)
+  #chol(K)
+  
+  origMat <- K
+  cholStatus <- try(u <- chol(origMat), silent = TRUE)
+  cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+  
+  newK <- K
+  iter <- 0
+  while (cholError) {
+    
+    iter <- iter + 1
+    cat("iteration ", iter, "\n")
+    
+    # replace -ve eigen values with small +ve number
+    newEig <- eigen(newK)
+    newEig2 <- ifelse(newEig$values < 1e-10, 1e-10, newEig$values)
+    
+    # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
+    # eig vectors
+    newK <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
+    
+    # normalize modified matrix eqn 6 from Brissette et al 2007
+    newK <- newK/sqrt(diag(newK) %*% t(diag(newK)))
+    
+    # try chol again
+    cholStatus <- try(u <- chol(newK), silent = TRUE)
+    cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+  }
+  
+  kappa = kernelMatrix(rbf1, x = X_trn, y = X_tst)
+  kappa = (n_trn/n_tst) * rowSums(kappa)
+  
+  G = as.matrix(rbind(- rep(1, n_trn)
+                      , rep(1, n_trn)
+                      , - diag(n_trn)
+                      , diag(n_trn)
+  ))
+  h = c(- n_trn * (1 + eps)
+        , n_trn * (1 - eps)
+        , - B * rep(1, n_trn)
+        , rep(0, n_trn)
+  )
+  
+  sol = solve.QP(Dmat = newK, dvec = kappa, Amat = t(G), bvec = h)
+  
+  return(sol)
+}
