@@ -8,6 +8,7 @@ An `R` implementation of Kernel Mean Matching from [http://www.cs.cmu.edu/~arthu
 ```{r}
 library(data.table)
 library(kernlab)
+library(quadprog)
 
 setwd('~/github/bdr/')
 source('functions.R')
@@ -41,9 +42,9 @@ First we'll make the distributions of the matched survey data match the full fil
 ```{r}
 
 # set bounds for weights
-B = 1.0  # upper bound; B = 1 is the unweighted solution
+B = 5.0  # upper bound; B = 1 is the unweighted solution
 
-fmla_overlap_vars = as.formula(paste0('~', paste(file_and_survey_vars, collapse = '+')))
+fmla_overlap_vars = as.formula(paste0('~-1+', paste(file_and_survey_vars, collapse = '+')))
 X = modmat_all_levs(formula = fmla_overlap_vars, data = pew_data)
 
 X_trn = X[which(pew_data$matched == 1),]    # data to weight
@@ -56,11 +57,64 @@ eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton c
 
 
 # use RBF kernel for now
-rbf1 = rbfdot(sigma = 1)
+rbf1 = rbfdot(sigma = 0.1)
 K = kernelMatrix(rbf1, x = X_trn)
+#chol(K)
+
+origMat <- K
+cholStatus <- try(u <- chol(origMat), silent = FALSE)
+cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+
+newK <- K
+iter <- 0
+while (cholError) {
+
+    iter <- iter + 1
+    cat("iteration ", iter, "\n")
+
+    # replace -ve eigen values with small +ve number
+    newEig <- eigen(newK)
+    newEig2 <- ifelse(newEig$values < 1e-10, 1e-10, newEig$values)
+
+    # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
+    # eig vectors
+    newK <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
+
+    # normalize modified matrix eqn 6 from Brissette et al 2007
+    newK <- newK/sqrt(diag(newK) %*% t(diag(newK)))
+
+    # try chol again
+    cholStatus <- try(u <- chol(newK), silent = TRUE)
+    cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+}
+
 kappa = kernelMatrix(rbf1, x = X_trn, y = X_tst)
 kappa = (n_trn/n_tst) * rowSums(kappa)
 
+G = as.matrix(rbind(- rep(1, n_trn)
+                     , rep(1, n_trn)
+                     , - diag(n_trn)
+                     , diag(n_trn)
+                     ))
+h = c(- n_trn * (1 + eps)
+                , n_trn * (1 - eps)
+                , - B * rep(1, n_trn)
+                , rep(0, n_trn)
+                )
+    
+sol = solve.QP(Dmat = newK, dvec = kappa, Amat = t(G), bvec = h)
+summary(sol$solution)
+hist(sol$solution)
+```
 
+
+Check distributions
+```{r}
+sol$solution
+data.table(var = colnames(X_tst)
+           ,target = colSums(X_tst)/nrow(X_tst)
+, raw = colSums(X_trn)/nrow(X_trn)
+, weighted = t(sol$solution %*% X_trn/nrow(X_trn))
+)
 ```
 
