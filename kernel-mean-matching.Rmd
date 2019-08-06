@@ -1,0 +1,66 @@
+---
+title: "Kernel Mean Matching"
+output: html_notebook
+---
+
+An `R` implementation of Kernel Mean Matching from [http://www.cs.cmu.edu/~arthurg/papers/covariateShiftChapter.pdf](http://www.cs.cmu.edu/~arthurg/papers/covariateShiftChapter.pdf).  Adapted from [https://github.com/vodp/py-kmm/blob/master/Kernel%20Meam%20Matching.ipynb].
+
+```{r}
+library(data.table)
+library(kernlab)
+
+setwd('~/github/bdr/')
+source('functions.R')
+
+
+pew_data = fread('data/pew_data.csv')
+pew_data[y_dem == 1, support := '1-Dem']
+pew_data[y_rep == 1, support := '2-Rep']
+pew_data[y_oth == 1, support := '3-Other']
+
+#categorize variables
+survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology')
+file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
+all_vars = names(pew_data)[grepl('demo', names(pew_data))]
+file_only_vars = all_vars[!all_vars %in% c(survey_vars, file_and_survey_vars)]
+
+# set n_bags
+n_bags = 30
+
+## get test train sets
+testtrain = getTestTrain(data = pew_data
+                         , n_holdout = 1000, n_surveyed = 2000, n_matched = 1000
+                         , p_surveyed = pew_data$p_surveyed
+                         , p_matched = pew_data$p_matched
+)
+pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
+
+```
+
+First we'll make the distributions of the matched survey data match the full file
+```{r}
+
+# set bounds for weights
+B = 1.0  # upper bound; B = 1 is the unweighted solution
+
+fmla_overlap_vars = as.formula(paste0('~', paste(file_and_survey_vars, collapse = '+')))
+X = modmat_all_levs(formula = fmla_overlap_vars, data = pew_data)
+
+X_trn = X[which(pew_data$matched == 1),]    # data to weight
+X_tst = X[which(pew_data$voterfile == 1),]  # target
+
+n_trn = nrow(X_trn)
+n_tst = nrow(X_tst)
+
+eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
+
+
+# use RBF kernel for now
+rbf1 = rbfdot(sigma = 1)
+K = kernelMatrix(rbf1, x = X_trn)
+kappa = kernelMatrix(rbf1, x = X_trn, y = X_tst)
+kappa = (n_trn/n_tst) * rowSums(kappa)
+
+
+```
+
