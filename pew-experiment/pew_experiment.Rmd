@@ -241,8 +241,6 @@ rbf1 = rbfdot(sigma = 1)
 K_sigma = kernelMatrix(rbf1, x = as.matrix(X_file), y = landmarks$landmarks)
 sigma = median(K_sigma)
 
-train_bag = data_recoded[voterfile == 1, bag]
-test_bag = data_recoded[holdout == 1, bag]
 
 # get features
 features = getFeatures(data = landmarks$X
