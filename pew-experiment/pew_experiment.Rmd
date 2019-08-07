@@ -241,7 +241,6 @@ rbf1 = rbfdot(sigma = 1)
 K_sigma = kernelMatrix(rbf1, x = as.matrix(X_file), y = landmarks$landmarks)
 sigma = median(K_sigma)
 
-
 # get features
 features = getFeatures(data = landmarks$X
                        , bag = data_recoded$bag
