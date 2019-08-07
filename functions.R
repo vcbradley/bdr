@@ -419,9 +419,6 @@ getBags = function(data = NULL, vars, n_bags = NULL, newdata = NULL, bags = NULL
 
 
 getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
-  require(tictoc)
-  
-  tic("getting landmarks")
   
   modmat_fmla = as.formula(paste('~', paste(vars, collapse = '+')))
   
@@ -431,8 +428,7 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
   # get group definitions with k-means
   landmarks = kmeanspp(data = X[subset_ind, ], k = n_landmarks, iter.max = 1)
   landmarks = as.matrix(landmarks$inicial.centers)
-  
-  toc()
+
   return(list(landmarks = landmarks, X = X))
 }
 
