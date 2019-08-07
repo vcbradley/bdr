@@ -9,6 +9,18 @@ An `R` implementation of Kernel Mean Matching from [http://www.cs.cmu.edu/~arthu
 
 The `doKMM` function is defined in `functions.R`.
 
+The goal of this implementation is to re-weight (in two-steps) survey data to match data from a voterfile.  The steps are:
+
+1. Weight the matched survey data so that covariate distributions match those of the file data.  Covariates used are those that appear in the file.
+2. Weight the unmatched survey data so that covariate distributions match those of the **weighted** matched survey data.
+
+Another option:
+
+1. Weight the matched survey data to the file with all file covariates
+2. Weight the unmatched AND weighted matched survey data to file using just overlapping covariates
+
+**Downside**: don't get to use the survey-only covariates
+
 ```{r setup}
 library(data.table)
 library(kernlab)

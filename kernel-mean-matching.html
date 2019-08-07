@@ -1639,6 +1639,18 @@ summary {
 
 
 <p>An <code>R</code> implementation of Kernel Mean Matching from <a href="http://www.cs.cmu.edu/~arthurg/papers/covariateShiftChapter.pdf">http://www.cs.cmu.edu/~arthurg/papers/covariateShiftChapter.pdf</a>. Adapted from [<a href="https://github.com/vodp/py-kmm/blob/master/Kernel%20Meam%20Matching.ipynb" class="uri">https://github.com/vodp/py-kmm/blob/master/Kernel%20Meam%20Matching.ipynb</a>].</p>
+<p>The <code>doKMM</code> function is defined in <code>functions.R</code>.</p>
+<p>The goal of this implementation is to re-weight (in two-steps) survey data to match data from a voterfile. The steps are:</p>
+<ol style="list-style-type: decimal">
+<li>Weight the matched survey data so that covariate distributions match those of the file data. Covariates used are those that appear in the file.</li>
+<li>Weight the unmatched survey data so that covariate distributions match those of the <strong>weighted</strong> matched survey data.</li>
+</ol>
+<p>Another option:</p>
+<ol style="list-style-type: decimal">
+<li>Weight the matched survey data to the file with all file covariates</li>
+<li>Weight the unmatched AND weighted matched survey data to file using just overlapping covariates</li>
+</ol>
+<p><strong>Downside</strong>: don’t get to use the survey-only covariates</p>
 <pre class="r"><code>library(data.table)
 library(kernlab)
 library(quadprog)</code></pre>
@@ -1685,7 +1697,7 @@ testtrain = getTestTrain(data = pew_data
 <pre class="r"><code>pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]</code></pre>
 <div data-pagedtable="false">
 <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["holdout"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["surveyed"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["matched"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["voterfile"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["N"],"name":[5],"type":["int"],"align":["right"]},{"label":["V2"],"name":[6],"type":["dbl"],"align":["right"]}],"data":[{"1":"0","2":"1","3":"0","4":"0","5":"1000","6":"0.5050000"},{"1":"0","2":"1","3":"1","4":"1","5":"1000","6":"0.4750000"},{"1":"0","2":"0","3":"0","4":"1","5":"2259","6":"0.4931386"},{"1":"1","2":"0","3":"0","4":"0","5":"1000","6":"0.4640000"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["holdout"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["surveyed"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["matched"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["voterfile"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["N"],"name":[5],"type":["int"],"align":["right"]},{"label":["V2"],"name":[6],"type":["dbl"],"align":["right"]}],"data":[{"1":"0","2":"1","3":"0","4":"0","5":"1000","6":"0.4830000"},{"1":"1","2":"0","3":"0","4":"0","5":"1000","6":"0.4800000"},{"1":"0","2":"0","3":"0","4":"1","5":"2259","6":"0.4887118"},{"1":"0","2":"1","3":"1","4":"1","5":"1000","6":"0.4910000"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 <p>First we’ll make the distributions of the matched survey data match the full file</p>
