@@ -16,10 +16,18 @@ pew_data[y_dem == 1, support := '1-Dem']
 pew_data[y_rep == 1, support := '2-Rep']
 pew_data[y_oth == 1, support := '3-Other']
 
+
+# mean impute age
+
+pew_data[, age_num_imp := as.numeric(age_num)]
+pew_data[is.na(age_num_imp), age_num_imp := mean(pew_data$age_num, na.rm = T)]
+summary(pew_data[, age_num_imp])
+
+
 #categorize variables
 survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology')
 file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
-all_vars = names(pew_data)[grepl('demo', names(pew_data))]
+all_vars = names(pew_data)[grepl('demo|^age_num_imp', names(pew_data))]
 file_only_vars = all_vars[!all_vars %in% c(survey_vars, file_and_survey_vars)]
 
 # set n_bags
@@ -38,11 +46,12 @@ pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
     
 ### fit DR
 dr_fit = doBasicDR(data = pew_data
-                     , bagging_vars = c(file_and_survey_vars, survey_vars)
+                     , make_bags_vars = file_and_survey_vars
+                     , score_bags_vars = file_and_survey_vars
                      , regression_vars = c(file_and_survey_vars, file_only_vars)
                      , outcome = c('y_dem', 'y_rep', 'y_oth')
                      , n_bags = 75
-                     , n_landmarks = 500
+                     , n_landmarks = 50
                      , sigma = 0.0005
                      , family = 'multinomial'
                      , bagging_ind = 'surveyed'
@@ -57,9 +66,10 @@ pew_data[, y_oth_grpmean := NULL]
 Y_grp_means = dr_fit$data[surveyed == 1, lapply(.SD, mean), .SDcols = outcome, by = bag]
 setnames(Y_grp_means, c('bag',paste0(outcome, '_grpmean')))
 pew_data = merge(pew_data, Y_grp_means, by = 'bag', all.x = T)
+pew_data[is.na(y_dem_grpmean), y_dem_grpmean := 0]
+pew_data[is.na(y_rep_grpmean), y_rep_grpmean := 0]
+pew_data[is.na(y_oth_grpmean), y_oth_grpmean := 0]
 
-calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% outcome), with = F]))
-                   , Y_pred = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% paste0(outcome, '_grpmean')), with = F])))
 
 
 ## Basic LASSO
@@ -77,6 +87,16 @@ pew_data[, c('y_dem_logit', 'y_rep_logit', 'y_oth_logit') :=
 
 
 ##### COMPARE #####
+
+# MSE
+calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% outcome), with = F]))
+        , Y_pred = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% paste0(outcome, '_hat')), with = F])))
+calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% outcome), with = F]))
+        , Y_pred = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% paste0(outcome, '_grpmean')), with = F])))
+calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% outcome), with = F]))
+        , Y_pred = as.numeric(unlist(pew_data[holdout == 1, which(names(pew_data) %in% paste0(outcome, '_logit')), with = F])))
+
+
 
 pew_data$class_dr = c('1-Dem', '2-Rep', '3-Other')[apply(pew_data[, paste0(outcome, '_hat'), with = F], 1, which.max)]
 pew_data$class_grpmean = c('1-Dem', '2-Rep', '3-Other')[apply(pew_data[, paste0(outcome, '_grpmean'), with = F], 1, which.max)]
@@ -100,9 +120,6 @@ doDecilePlot(data = pew_data, score_name = 'y_dem_hat', title = 'Dist Reg')
 , doDecilePlot(data = pew_data, score_name = 'y_dem_logit', title = 'Logit')
 , ncol = 3)
 
-
-# check sub-groups
-v = 'demo_sex'
 
 
 getXtab = function(var, data){
