@@ -7,6 +7,8 @@ output:
 
 An `R` implementation of Kernel Mean Matching from [http://www.cs.cmu.edu/~arthurg/papers/covariateShiftChapter.pdf](http://www.cs.cmu.edu/~arthurg/papers/covariateShiftChapter.pdf).  Adapted from [https://github.com/vodp/py-kmm/blob/master/Kernel%20Meam%20Matching.ipynb].
 
+The `doKMM` function is defined in `functions.R`.
+
 ```{r setup}
 library(data.table)
 library(kernlab)
