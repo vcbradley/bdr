@@ -1,6 +1,8 @@
 ---
 title: "Bagging Analysis"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 This notebook examines the robustness of `k-means++` for creating bags for distribution regression, and compares bags created with all observations in a voterfile v. just those observed in a survey.
@@ -12,9 +14,7 @@ library(gridExtra)
 library(ggplot2)
 library(Rfast)
 
-setwd('~/github/bdr')
-
-source('functions.R') # contains the key functions for basic dist reg
+source('../functions.R') # contains the key functions for basic dist reg
 ```
 
 ## Read in data, set parameters.  
@@ -24,7 +24,7 @@ survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called',
 file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
 
 # read in *recoded* data
-pew_data = fread('data/pew_data.csv')
+pew_data = fread('../data/pew_data.csv')
 
 # set n_bags
 n_bags = 30
@@ -47,7 +47,7 @@ pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 
 Run `k-means++` 50 times to generate bags using each 1) all the voterfile observations and 2) just the survey data.
 
-```{r bagging}
+```{r bagging, cache = T}
 bag_iter = 50
 bag_svy_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
 bag_all_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
@@ -95,14 +95,19 @@ grid.arrange(plot_bagsize_all, plot_bagsize_svy)
 
 We also want to make sure that when we're generating bags with the voterfile data, those bags aren't empty in the survey data (which would leave us without an estimate of the outcome in that bag).  Simlarly, when we generate the bags with just the survey data, we want to make sure that no bags are missing from the voterfile data, which would force us to throw away outcome data.
 
-None of the bags are missing observations, no matter which data is used to generate the bags
+NOTE: I've seen some simulation runs with empty bags when all data is used for bagging, but most of the time there aren't any empty.  This probably depends on the ratio of survey data to voterfile data - easier for there to be missing bags when defined by the voterfile and survey data is much smaller.
 
 ```{r}
 bag_mat[id %in% pew_data[, which(surveyed == 1)], .(length(unique(bag_svy)), length(unique(bag_all))), iter][, .(min_bag_svy = min(V1), min_bag_all = min(V2))]
 ```
 
 
-### Bag similarity - LOTS of overlap
+### Bag similarity
+
+Let's look at what proportion of the time that pairs of observations end up in the same bags as one another.
+
+Heavy tail indicates that some pairs almost always end up together, though mode at 0 - most never overlap, or overlap only a few times.  No real difference in overlap patterns depending on which data is used to bag.
+
 ```{r}
 bag_mat[, iter_bag_svy := interaction(iter, bag_svy)]
 bag_mat[, iter_bag_all := interaction(iter, bag_all)]
@@ -111,8 +116,8 @@ bag_svy_overlap = merge(bag_mat, bag_mat, by = 'iter_bag_svy', allow.cartesian=T
 bag_all_overlap = merge(bag_mat, bag_mat, by = 'iter_bag_all', allow.cartesian=TRUE)[, .N, by = .(id.x,id.y)]
 
 ggplot() + 
-  geom_density(data = bag_svy_overlap[id.x != id.y,], aes(x = N, color = 'svy')) +
-  geom_density(data = bag_all_overlap[id.x != id.y,], aes(x = N, color = 'all')) +
+  geom_density(data = bag_svy_overlap[id.x != id.y,], aes(x = N/50, color = 'svy')) +
+  geom_density(data = bag_all_overlap[id.x != id.y,], aes(x = N/50, color = 'all')) +
   ggtitle("Bag overlap") +
   xlab("Number of overlaps")
 ```
@@ -123,9 +128,9 @@ ggplot() +
 
 ### Run simulation
 
-Run `k-means++` 50 times to generate bags using each 1) all the voterfile observations and 2) just the survey data.
+Run `k-means++` 50 times to generate bags using each 1) the variables that exist both on the file and the survey AND those just on the survey 2) just the overlapping variables.  In the first version, we assign observations to bags only using the overlapping variables (even for the survey data).
 
-```{r bagging-vars}
+```{r bagging-vars, cache = T}
 bag_iter = 50
 bag_allvars_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
 bag_svyvars_mat = matrix(rep(0, bag_iter * nrow(pew_data)), nrow = nrow(pew_data))
@@ -147,7 +152,9 @@ for(i in 1:bag_iter){
   bags_temp$bag_fit$centers = bags_temp$bag_fit$centers[, which(colnames(bags_temp$bag_fit$centers) %in% colnames(X))]
   
   # fit bags with limited centers
-  bag_allvars_mat[, i] = getBags(bags = bags_temp$bag_fit, vars = file_and_survey_vars, newdata = pew_data)$bags_newdata
+  bag_allvars_mat[, i] = getBags(bags = bags_temp$bag_fit
+                                 , vars = file_and_survey_vars
+                                 , newdata = pew_data)$bags_newdata
   
   ### VERSION 2 - just overlapping vars
   bag_svyvars_mat[, i] = getBags(data = pew_data[surveyed == 1, ]
@@ -180,7 +187,8 @@ grid.arrange(plot_bagsize_vars_all, plot_bagsize_vars_svy)
 ```
 
 ### Empty bags
-When we use all the variables, there are empty bags in the survey data
+
+When we use all the variables to make bags and assign just with the overlapping variables, we end up with empty bags in both the survey and the voterfile.  If instad we assigned survey observations to bags using all the variables, we'd end up throwing out the outcome data for bags that don't exist in the voterfile.
 
 ```{r}
 bag_vars_mat[, .(length(unique(bag_overlaponly)), length(unique(bag_allvars))), iter][, .(min_bag_svy = min(V1), min_bag_all = min(V2))]
