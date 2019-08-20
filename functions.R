@@ -1,4 +1,10 @@
 
+library(Rfast)
+library(data.table)
+library(ggplot2)
+library(kernlab)
+
+
 calcMSE = function(Y, Y_pred){
   mean((Y_pred - Y)^2, na.rm = T)
 }
@@ -535,17 +541,18 @@ doBasicDR = function(data
                      , bagging_ind = 'surveyed'
                      , train_ind = 'voterfile'
                      , test_ind = 'holdout'
+                     , weight_col = NULL
 ){
   
   require(glmnet)
   require(kernlab)
   
-  # cat(sum(data[, get(bagging_ind)]))
-  # cat('\n')
-  # cat(sum(data[, get(train_ind)]))
-  # cat('\n')
-  # cat(sum(data[, get(test_ind)]))
-  # cat('\n')
+  if(is.null(weight_col)){
+    pew_data[, weight := rep(1, nrow(pew_data))]
+  }else{
+    pew_data[, weight := get(weight_col)]
+  }
+  
   
   data[, bag := NULL]
   
@@ -581,9 +588,9 @@ doBasicDR = function(data
   
   # prep outcome
   if(family == 'multinomial'){
-    Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, sum), .SDcols = outcome, by = bag][order(bag)]
+    Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = outcome, by = bag][order(bag)]
   }else{
-    Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = mean(get(outcome))), bag][order(bag)]
+    Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = weigted.mean(get(outcome), w = weight)), bag][order(bag)]
   }
   
   # make sure Y has all bags
@@ -647,6 +654,36 @@ doDecilePlot = function(data, score_name, title = NULL){
 }
 
 
+ridgeMat = function(origMat){
+  cholStatus <- try(u <- chol(origMat), silent = TRUE)
+  cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+  
+  newMat <- origMat
+  iter <- 0
+  while (cholError) {
+    
+    iter <- iter + 1
+    cat("iteration ", iter, "\n")
+    
+    # replace -ve eigen values with small +ve number
+    newEig <- eigen(newMat)
+    newEig2 <- newEig$values + 2 *abs(min(newEig$values))# + 1e-10  # add in the min eigenvalue
+    #newEig2 <- ifelse(newEig$values < 1e-10, 1e-10, newEig$values)
+    
+    # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
+    # eig vectors
+    newMat <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
+    
+    # normalize modified matrix eqn 6 from Brissette et al 2007
+    newMat <- newMat/sqrt(diag(newMat) %*% t(diag(newMat)))
+    
+    # try chol again
+    cholStatus <- try(u <- chol(newMat), silent = TRUE)
+    cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+  }
+  return(newMat)
+}
+
 
 doKMM = function(X_trn, X_tst, B = 1, sigma = 1, kernel_type = 'rbf'){
   n_trn = nrow(X_trn)
@@ -657,34 +694,10 @@ doKMM = function(X_trn, X_tst, B = 1, sigma = 1, kernel_type = 'rbf'){
   # use RBF kernel for now
   rbf1 = rbfdot(sigma = sigma)
   K = kernelMatrix(rbf1, x = X_trn)
-  #chol(K)
   
-  origMat <- K
-  cholStatus <- try(u <- chol(origMat), silent = TRUE)
-  cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
-  
-  newK <- K
-  iter <- 0
-  while (cholError) {
-    
-    iter <- iter + 1
-    cat("iteration ", iter, "\n")
-    
-    # replace -ve eigen values with small +ve number
-    newEig <- eigen(newK)
-    newEig2 <- ifelse(newEig$values < 1e-10, 1e-10, newEig$values)
-    
-    # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
-    # eig vectors
-    newK <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
-    
-    # normalize modified matrix eqn 6 from Brissette et al 2007
-    newK <- newK/sqrt(diag(newK) %*% t(diag(newK)))
-    
-    # try chol again
-    cholStatus <- try(u <- chol(newK), silent = TRUE)
-    cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
-  }
+  # fix to make sure we can use Cholesky decomp
+  newK = nearPD(K)$mat
+  chol(newK)
   
   kappa = kernelMatrix(rbf1, x = X_trn, y = X_tst)
   kappa = (n_trn/n_tst) * rowSums(kappa)
@@ -703,4 +716,22 @@ doKMM = function(X_trn, X_tst, B = 1, sigma = 1, kernel_type = 'rbf'){
   sol = solve.QP(Dmat = newK, dvec = kappa, Amat = t(G), bvec = h)
   
   return(sol)
+}
+
+
+
+getWeights = function(data, vars, train_ind, target_ind, B = 5, sigma = 0.1){
+  
+  fmla = as.formula(paste0('~', paste(vars, collapse = '+')))
+  X = model.matrix(object = fmla, data = data)  #not all levels
+  
+  X_train = X[which(data[, get(train_ind)] == 1),]    # data to weight
+  X_target = X[which(data[, get(target_ind)] == 1),]  # target
+  
+  w_matched = doKMM(X_trn = X_train, X_tst = X_target, sigma = sigma, B = B)  # the smaller sigma is, the more weighting that happens 
+  
+  # calculate weights
+  w_matched$weights = (nrow(X_matched)/sum(w_matched$solution)) * w_matched$solution
+  
+  return(weights = w_matched$weights)
 }
