@@ -3,7 +3,6 @@ library(entropy)
 library(gridExtra)
 library(ggplot2)
 library(Rfast)
-library(tictoc) # for benchmarking
 library(kernlab)
 
 setwd('~/github/bdr')
@@ -18,20 +17,20 @@ pew_data[y_oth == 1, support := '3-Other']
 
 
 # mean impute age
-
 pew_data[, age_num_imp := as.numeric(age_num)]
 pew_data[is.na(age_num_imp), age_num_imp := mean(pew_data$age_num, na.rm = T)]
 summary(pew_data[, age_num_imp])
 
+#scale age
+pew_data[, age_scaled := scale(age_num_imp)/5]
 
 #categorize variables
-survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'month_called', 'demo_ideology')
-file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_state', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
-all_vars = names(pew_data)[grepl('demo|^age_num_imp', names(pew_data))]
+survey_vars = c('demo_mode', 'demo_education', 'demo_phonetype', 'demo_ideology')
+file_and_survey_vars = c('demo_sex', 'demo_age_bucket', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
+all_vars = names(pew_data)[grepl('demo|^age_scaled', names(pew_data))]
+all_vars = all_vars[-which(grepl('demo_state|month_called', all_vars))]
 file_only_vars = all_vars[!all_vars %in% c(survey_vars, file_and_survey_vars)]
 
-# set n_bags
-n_bags = 30
 
 ## get test train sets
 testtrain = getTestTrain(data = pew_data
@@ -39,10 +38,42 @@ testtrain = getTestTrain(data = pew_data
                          , p_surveyed = pew_data$p_surveyed
                          , p_matched = pew_data$p_matched
 )
+pew_data[, unmatched := as.numeric(surveyed == 1 & matched == 0)]
 pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 
 
+######### WEIGHT DATA ##########
 
+B = 5.0  # upper bound; B = 1 is the unweighted solution
+sigma = 0.25
+
+vars = c(file_and_survey_vars, file_only_vars)
+
+w_matched = getWeights(data = pew_data
+           , vars = c(file_and_survey_vars, file_only_vars)
+           , train_ind = 'matched'
+           , target_ind = 'voterfile'
+           , sigma = 0.2)
+hist(w_matched)
+summary(w_matched)
+
+w_unmatched = getWeights(data = pew_data
+                       , vars = c(file_and_survey_vars, survey_vars)
+                       , train_ind = 'unmatched'
+                       , target_ind = 'matched'
+                       , sigma = 0.2)
+hist(w_unmatched)
+summary(w_unmatched)
+
+pew_data[, weight := 1]
+pew_data[matched == 1, weight := w_matched]
+pew_data[unmatched == 1, weight := w_unmatched]
+
+hist(pew_data$weight)
+summary(pew_data$weight)
+
+
+#################
     
 ### fit DR
 dr_fit = doBasicDR(data = pew_data
@@ -51,12 +82,13 @@ dr_fit = doBasicDR(data = pew_data
                      , regression_vars = c(file_and_survey_vars, file_only_vars)
                      , outcome = c('y_dem', 'y_rep', 'y_oth')
                      , n_bags = 75
-                     , n_landmarks = 50
-                     , sigma = 0.0005
+                     , n_landmarks = 200
+                     , sigma = 0.01
                      , family = 'multinomial'
                      , bagging_ind = 'surveyed'
                      , train_ind = 'voterfile'
-                     , test_ind = 'holdout')
+                     , test_ind = 'holdout'
+                   , weight_col = 'weight')
 dr_fit$mse_test
 
 ### calculate group means - re-run after running DR because bags will be re-fit
