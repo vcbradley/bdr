@@ -460,12 +460,17 @@ predict.kmeans <- function(object,
 }
 
 
-getFeatures = function(data, bag, train_ind, landmarks, sigma){
+getFeatures = function(data, bag, train_ind, landmarks, kernel_type = 'rbf', sigma){
+  
   # create kernel
-  rbf = rbfdot(sigma = sigma)
+  if(kernel_type == 'rbf'){
+    kern = rbfdot(sigma = sigma)
+  } else if(kernel_type == 'linear'){
+    kern = vanilladot()
+  }
   
   # calculate features for train
-  phi_x = kernelMatrix(rbf, x = as.matrix(data), y = landmarks)
+  phi_x = kernelMatrix(kern, x = as.matrix(data), y = landmarks)
   phi_x = data.table(bag = bag, phi_x)
   setnames(phi_x, c('bag', paste0('u', 1:nrow(landmarks))))
   
@@ -542,6 +547,7 @@ doBasicDR = function(data
                      , train_ind = 'voterfile'
                      , test_ind = 'holdout'
                      , weight_col = NULL
+                     , kernel_type = 'rbf'
 ){
   
   require(glmnet)
@@ -583,7 +589,8 @@ doBasicDR = function(data
                          , bag = as.numeric(data[, bag])
                          , train_ind = as.numeric(data[, get(train_ind)])
                          , landmarks = landmarks$landmarks
-                         , sigma = sigma)
+                         , sigma = sigma
+                         , kernel_type = kernel_type)
   
   
   # prep outcome
