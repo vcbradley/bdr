@@ -145,16 +145,16 @@ Are we actually making the kernel means closer?
 ```{r}
   #rbf1 = rbfdot(sigma = 9)
 lin = vanilladot()
-  K1 = kernelMatrix(lin, x = X_matched_weighted, X_matched)
+  K1 = kernelMatrix(lin, x = X_matched, X_matched)
   K2 = kernelMatrix(lin, x = X_matched_weighted, X_matched_weighted)
   K3 = kernelMatrix(lin, x = X_matched_weighted, X_unmatched)
   K4 = kernelMatrix(lin, x = X_matched_weighted, X_unmatched_weighted)
   
   dist(rbind(
-    colSums(K1)/nrow(K1)
-    , colSums(K2)/nrow(K2)
-  ,colsums(K3)/nrow(K3)
-  ,colsums(K4)/nrow(K4)
+    rowSums(K1)/nrow(K1)
+     ,rowSums(K2)/ncol(K2)
+  ,rowSums(K3)/ncol(K3)
+  ,rowSums(K4)/ncol(K4)
   ))
   
 ```

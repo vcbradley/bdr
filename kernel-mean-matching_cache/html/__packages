@@ -2,3 +2,8 @@ base
 data.table
 kernlab
 quadprog
+Rcpp
+RcppZiggurat
+Rfast
+ggplot2
+Matrix
