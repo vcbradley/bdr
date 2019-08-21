@@ -744,7 +744,12 @@ doKMM = function(X_trn, X_tst, B = 1, kernel_type = 'linear'
 
 
 
-getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL, B = 5, sigma = 0.1){
+getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
+                      , B = 1
+                      , kernel_type = 'linear'
+                      , sigma = 1  #rbf params
+                      , theta = 1.0, smoothness = 0.5, scale=1 #matern params
+                      ){
   
   fmla = as.formula(paste0('~-1', paste(vars, collapse = '+')))
   X = model.matrix(object = fmla, data = data)  #not all levels
@@ -757,7 +762,12 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL, B = 
   X_train = X[which(data[, get(train_ind)] == 1),]    # data to weight
   X_target = X[which(data[, get(target_ind)] == 1),]  # target
   
-  w_matched = doKMM(X_trn = X_train, X_tst = X_target, sigma = sigma, B = B)  # the smaller sigma is, the more weighting that happens 
+  w_matched = doKMM(X_trn = X_train, X_tst = X_target
+                    , B = B
+                    , kernel_type = kernel_type
+                    , sigma = sigma
+                    , theta = theta, smoothness = smoothness, scale = scale
+                    )  # the smaller sigma is, the more weighting that happens 
   
   # calculate weights
   w_matched$weights = (nrow(X_matched)/sum(w_matched$solution)) * w_matched$solution
