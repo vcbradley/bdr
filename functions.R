@@ -686,8 +686,13 @@ doDecilePlot = function(data, score_name, title = NULL){
 # }
 
 
-doKMM = function(X_trn, X_tst, B = 1, sigma = 1, kernel_type = 'rbf'){
+doKMM = function(X_trn, X_tst, B = 1, kernel_type = 'linear'
+                 , sigma = 1  #rbf params
+                 , theta = 1.0, smoothness = 0.5, scale=1 #matern params
+                 ){
   require(Matrix)
+  require(kernlab)
+  require(fields)
   
   n_trn = nrow(X_trn)
   n_tst = nrow(X_tst)
@@ -698,14 +703,27 @@ doKMM = function(X_trn, X_tst, B = 1, sigma = 1, kernel_type = 'rbf'){
   #rbf1 = rbfdot(sigma = sigma)
   #K = kernelMatrix(rbf1, x = X_trn)
   
-  kern = vanilladot()
-  K = kernelMatrix(kern, x = X_trn)
+  if(kernel_type == 'linear'){
+    kern = vanilladot()
+    K = kernelMatrix(kern, x = X_trn)
+  }else if(kernel_type == 'rbf'){
+    kern = rbfdot(sigma = sigma)
+    K = kernelMatrix(kern, x = X_trn)
+  }else if(kernel_type == 'matern'){
+    K = matern.cov(X_trn, theta = theta, smoothness = smoothness, scale = scale)
+  }else{
+    stop("Kernel type not supported")
+  }
   
   # fix to make sure we can use Cholesky decomp
   newK = nearPD(K)$mat
-  #chol(newK)
   
-  kappa = kernelMatrix(kern, x = X_trn, y = X_tst)
+  if(kernel_type == 'matern'){
+    kappa = matern.cov(X_trn, X_tst, theta = theta, smoothness = smoothness, scale = scale)
+  }else{
+    kappa = kernelMatrix(kern, x = X_trn, y = X_tst)
+  }
+  
   kappa = (n_trn/n_tst) * rowSums(kappa)
   
   G = as.matrix(rbind(- rep(1, n_trn)
