@@ -63,13 +63,13 @@ pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 ```
 
 First we'll make the distributions of the matched survey data match the full file
-```{r kmm-1, cache = T}
+```{r kmm-1}
 # set bounds for weights
 B = 5.0  # upper bound; B = 1 is the unweighted solution
 
 vars = c(file_and_survey_vars, file_only_vars)
 
-fmla_overlap_vars = as.formula(paste0('~', paste(vars, collapse = '+')))
+fmla_overlap_vars = as.formula(paste0('~-1+', paste(vars, collapse = '+')))
 X = model.matrix(object = fmla_overlap_vars, data = pew_data)  #not all levels
 
 X_matched = X[which(pew_data$matched == 1),]    # data to weight
@@ -78,7 +78,7 @@ X_file = X[which(pew_data$voterfile == 1),]  # target
 d_matched = as.matrix(dist(X_matched))
 median(d_matched)
 
-w_matched = doKMM(X_trn = X_matched, X_tst = X_file, sigma = 0.25, B = 5)  # the smaller sigma is, the more weighting that happens 
+w_matched = doKMM(X_trn = X_matched, X_tst = X_file, B = 3) 
 
 # calculate weights
 w_matched$weights = (nrow(X_matched)/sum(w_matched$solution)) * w_matched$solution
@@ -88,33 +88,37 @@ hist(w_matched$weights)
 ```
 Compare raw and weighted distributions to those of the target
 ```{r check-dist-1}
-data.table(var = colnames(X_file)
+xtabs1 = data.table(var = colnames(X_file)
            , target = colSums(X_file)/nrow(X_file)
            , matched_raw = colSums(X_matched)/nrow(X_matched)
            , matched_weighted = t(w_matched$weights %*% X_matched/nrow(X_matched))[,1]
 )
+xtabs1[, diff := round(matched_weighted - target, 2)]
+xtabs1
 ```
 
 
-```{r kmm-2, cache = T}
+```{r kmm-2}
 B = 5.0  # upper bound; B = 1 is the unweighted solution
 
 vars = c(survey_vars,file_and_survey_vars)
 
-fmla_survey_vars = as.formula(paste0('~', paste(vars, collapse = '+')))
+fmla_survey_vars = as.formula(paste0('~-1+', paste(vars, collapse = '+')))
 X = model.matrix(object = fmla_survey_vars, data = pew_data)
 
 X_matched = X[which(pew_data$matched == 1),]    # target
-X_matched_weighted = apply(X_matched, 2, function(x) x * w_matched$weights)
+X_matched_weighted = diag(w_matched$weights) %*% X_matched
 
 X_unmatched = X[which(pew_data$matched == 0 & pew_data$surveyed == 1),]  # data to weight
 
 d_v2 = dist(rbind(X_matched, X_unmatched))
 median(d_v2^2)
 
-w_unmatched = doKMM(X_trn = X_unmatched, X_tst = X_matched_weighted, sigma = 0.5, B = 5)
+w_unmatched = doKMM(X_trn = X_unmatched, X_tst = X_matched_weighted, B = 5)
 
 w_unmatched$weights = w_unmatched$solution * (nrow(X_unmatched)/sum(w_unmatched$solution))
+
+X_unmatched_weighted = diag(w_unmatched$weights) %*% X_unmatched
 
 summary(w_unmatched$weights)
 hist(w_unmatched$weights)
@@ -122,13 +126,37 @@ hist(w_unmatched$weights)
 
 
 Compare raw and weighted distributions to those of the target
+
+** setting sigma is key.  Controls balance between variance of weights and how well weighted margins match target margins.  Should set this with CV or soomething.
 ```{r check-dist-2}
-data.table(var = colnames(X_matched)
-           , target_raw = colSums(X_matched)/nrow(X_matched)
+xtabs2 = data.table(var = colnames(X_matched)
+           #, target_raw = colSums(X_matched)/nrow(X_matched)
            , target_weighted = colSums(X_matched_weighted)/nrow(X_matched_weighted)
            , unmatched_raw = colSums(X_unmatched)/nrow(X_unmatched)
            , unmatched_weighted = t((w_unmatched$weights %*% X_unmatched)/nrow(X_matched))[,1]
 )
+
+xtabs2[, diff := round(unmatched_weighted - target_weighted, 2)]
+xtabs2
+```
+
+
+Are we actually making the kernel means closer?
+```{r}
+  #rbf1 = rbfdot(sigma = 9)
+lin = vanilladot()
+  K1 = kernelMatrix(lin, x = X_matched_weighted, X_matched)
+  K2 = kernelMatrix(lin, x = X_matched_weighted, X_matched_weighted)
+  K3 = kernelMatrix(lin, x = X_matched_weighted, X_unmatched)
+  K4 = kernelMatrix(lin, x = X_matched_weighted, X_unmatched_weighted)
+  
+  dist(rbind(
+    colSums(K1)/nrow(K1)
+    , colSums(K2)/nrow(K2)
+  ,colsums(K3)/nrow(K3)
+  ,colsums(K4)/nrow(K4)
+  ))
+  
 ```
 
 
