@@ -751,7 +751,7 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
                       , theta = 1.0, smoothness = 0.5, scale=1 #matern params
                       ){
   
-  fmla = as.formula(paste0('~-1', paste(vars, collapse = '+')))
+  fmla = as.formula(paste0('~ -1 +', paste(vars, collapse = '+')))
   X = model.matrix(object = fmla, data = data)  #not all levels
   
   # if weights are supplied, multiply them through the observations of X
