@@ -432,7 +432,7 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
   X = modmat_all_levs(data = data, formula = modmat_fmla)
   
   # get group definitions with k-means
-  landmarks = kmeanspp(data = X[subset_ind, ], k = n_landmarks, iter.max = 1)
+  landmarks = suppressWarnings(kmeanspp(data = X[subset_ind, ], k = n_landmarks, iter.max = 1))
   landmarks = as.matrix(landmarks$inicial.centers)
 
   return(list(landmarks = landmarks, X = X))
@@ -539,45 +539,52 @@ doBasicDR = function(data
                      , score_bags_vars
                      , regression_vars
                      , outcome
-                     , n_bags
-                     , n_landmarks
-                     , sigma
+                     , n_bags = NULL
+                     , n_landmarks = NULL
+                     , sigma = NULL
                      , family = 'gaussian'
                      , bagging_ind = 'surveyed'
                      , train_ind = 'voterfile'
                      , test_ind = 'holdout'
                      , weight_col = NULL
                      , kernel_type = 'rbf'
+                     , landmarks = NULL
+                     , bags = NULL
 ){
   
   require(glmnet)
   require(kernlab)
   
   if(is.null(weight_col)){
-    pew_data[, weight := rep(1, nrow(pew_data))]
+    data[, weight := 1]
   }else{
-    pew_data[, weight := get(weight_col)]
+    data[, weight := get(weight_col)]
   }
-  
   
   data[, bag := NULL]
   
   # Make bags
-  cat(paste0(Sys.time(), "\t Making bags\n"))
-  bags = getBags(data = data[get(bagging_ind) == 1,]
-                 , vars = make_bags_vars
-                 , n_bags = n_bags
-                 , newdata = data[, score_bags_vars, with = F])
+  if(is.null(bags)){
+    cat(paste0(Sys.time(), "\t Making bags\n"))
+    bags = getBags(data = data[get(bagging_ind) == 1,]
+                   , vars = make_bags_vars
+                   , n_bags = n_bags
+                   , newdata = data[, score_bags_vars, with = F])
+  }else{
+    n_bags = length(unique(bags$bags_newdata))
+  }
   
   # assign data to bags
   data[, bag := bags$bags_newdata]
   
   # Get landmarks
-  cat(paste0(Sys.time(), "\t Getting landmarks\n"))
-  landmarks = getLandmarks(data = data
-                           , vars = regression_vars
-                           , n_landmarks = n_landmarks
-                           , subset_ind = (data[, get(train_ind)] == 1))
+  if(is.null(landmarks)){
+    cat(paste0(Sys.time(), "\t Getting landmarks\n"))
+    landmarks = getLandmarks(data = data
+                             , vars = regression_vars
+                             , n_landmarks = n_landmarks
+                             , subset_ind = (data[, get(train_ind)] == 1))
+  }
   
   # Make matricies for feature embedding
   X_file = landmarks$X[data[, get(train_ind)] == 1, ]
@@ -693,7 +700,9 @@ doDecilePlot = function(data, score_name, title = NULL){
 # }
 
 
-doKMM = function(X_trn, X_tst, B = 1, kernel_type = 'linear'
+doKMM = function(X_trn, X_tst
+                 , B = 1
+                 , kernel_type = 'linear'
                  , sigma = 1  #rbf params
                  , theta = 1.0, smoothness = 0.5, scale=1 #matern params
                  ){
@@ -705,10 +714,6 @@ doKMM = function(X_trn, X_tst, B = 1, kernel_type = 'linear'
   n_tst = nrow(X_tst)
   
   eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
-  
-  # use RBF kernel for now
-  #rbf1 = rbfdot(sigma = sigma)
-  #K = kernelMatrix(rbf1, x = X_trn)
   
   if(kernel_type == 'linear'){
     kern = vanilladot()
@@ -769,7 +774,8 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
   X_train = X[which(data[, get(train_ind)] == 1),]    # data to weight
   X_target = X[which(data[, get(target_ind)] == 1),]  # target
   
-  w_matched = doKMM(X_trn = X_train, X_tst = X_target
+  weighted = doKMM(X_trn = X_train
+                   , X_tst = X_target
                     , B = B
                     , kernel_type = kernel_type
                     , sigma = sigma
@@ -777,7 +783,7 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
                     )  # the smaller sigma is, the more weighting that happens 
   
   # calculate weights
-  w_matched$weights = (nrow(X_matched)/sum(w_matched$solution)) * w_matched$solution
+  weighted$weights = (nrow(X_train)/sum(weighted$solution)) * weighted$solution
   
-  return(weights = w_matched$weights)
+  return(weights = weighted$weights)
 }
