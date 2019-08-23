@@ -603,10 +603,14 @@ doBasicDR = function(data
   # prep outcome
   # if weighting col is specified, then use that to get weighted mean
   if(family == 'multinomial'){
-    Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = outcome, by = bag][order(bag)]
+    #Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = outcome, by = bag][order(bag)]
+    Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = outcome, by = bag][order(bag)]
   }else{
-    Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = weigted.mean(get(outcome), w = weight)), bag][order(bag)]
+    #Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = weigted.mean(get(outcome), w = weight)), bag][order(bag)]
+    Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = sum(weight)), bag][order(bag)]
   }
+  # weights might be negative and prodce negative estimates of Y, so floor at 0
+  Y_svy_bag[Y_svy_bag < 0] <- 0
   
   # make sure Y has all bags
   if(nrow(Y_svy_bag) < n_bags){
@@ -637,13 +641,15 @@ doBasicDR = function(data
                  )
   
   # score the file
-  data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
+  y_hat = data.table(data.frame(fit$Y))
+  setnames(y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+  #data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
   
   # calculate mse
   mse_test = calcMSE(Y = as.numeric(unlist(data[get(test_ind) == 1, which(names(data) %in% outcome), with = F]))
-                     , Y_pred = as.numeric(unlist(data[get(test_ind) == 1, which(names(data) %in% paste0(outcome, '_hat')), with = F])))
+                     , Y_pred = as.numeric(unlist(y_hat[which(data[,get(test_ind) == 1])])))
   
-  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = data[, which(names(data) %in% paste0(outcome, '_hat')), with = F], mse_test = mse_test))
+  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = y_hat, mse_test = mse_test))
 }
 
 
@@ -709,6 +715,7 @@ doKMM = function(X_trn, X_tst
   require(Matrix)
   require(kernlab)
   require(fields)
+  require(quadprog)
   
   n_trn = nrow(X_trn)
   n_tst = nrow(X_tst)
