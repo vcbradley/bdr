@@ -4,6 +4,7 @@ library(gridExtra)
 library(ggplot2)
 library(Rfast)
 library(kernlab)
+library(plotROC)
 
 setwd('~/github/bdr')
 
@@ -118,7 +119,7 @@ bags = getBags(data = pew_data[surveyed == 1,]
 #                , vars = file_and_survey_vars
 #                , n_bags = n_bags
 #                , newdata = pew_data[, file_and_survey_vars, with = F])
-bags_umn = bags
+bags_unm = bags
 bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew_data$matched))
 
 
@@ -138,8 +139,8 @@ fit_wdr = doBasicDR(data = pew_data
                      , test_ind = 'holdout'
                      , weight_col = 'kmm_weight'
                      , landmarks = landmarks
+                    , bags = bags
                      )
-setnames(pew_data, paste0(outcome, '_hat'), new = paste0(outcome, "_wdr"))
 fit_wdr$mse_test
 results[['wdr']] = fit_wdr$y_hat
 
@@ -158,7 +159,6 @@ fit_dr_linear = doBasicDR(data = pew_data
                             , test_ind = 'holdout'
                             , kernel_type = 'linear'
                           , landmarks = landmarks)
-setnames(pew_data, paste0(outcome, '_hat'), new = paste0(outcome, "_dr_ln"))
 fit_dr_linear$mse_test
 results[['dr_linear']] = fit_dr_linear$y_hat
 
@@ -168,7 +168,7 @@ fit_wdr_linear = doBasicDR(data = pew_data
                           , score_bags_vars = file_and_survey_vars
                           , regression_vars = regression_vars
                           , outcome = outcome
-                          , n_bags = n_bags
+                          #, n_bags = n_bags
                           #, n_landmarks = 300
                           #, sigma = 0.01
                           , family = 'multinomial'
@@ -177,8 +177,8 @@ fit_wdr_linear = doBasicDR(data = pew_data
                           , test_ind = 'holdout'
                           , kernel_type = 'linear'
                           , weight_col = 'kmm_weight'
-                          , landmarks = landmarks)
-setnames(pew_data, paste0(outcome, '_hat'), new = paste0(outcome, "_wdr_ln"))
+                          , landmarks = landmarks
+                          , bags = bags)
 fit_wdr_linear$mse_test
 results[['wdr_linear']] = fit_wdr_linear$y_hat
 
@@ -197,8 +197,8 @@ fit_dr = doBasicDR(data = pew_data
                             , train_ind = 'voterfile'
                             , test_ind = 'holdout'
                    , landmarks = landmarks
+                   , bags = bags
                             )
-setnames(pew_data, paste0(outcome, '_hat'), new = paste0(outcome, "_dr"))
 fit_dr$mse_test
 results[['dr']] = fit_dr$y_hat
 
@@ -219,15 +219,11 @@ fit_dr_sepbags = doBasicDR(data = pew_data
                    , landmarks = landmarks
                    , bags = bags_unm
 )
-setnames(pew_data, paste0(outcome, '_hat'), new = paste0(outcome, "_dr_sepbags"))
 fit_dr_sepbags$mse_test
 results[['dr_sepbags']] = fit_dr_sepbags$y_hat
 
 #------------------------------------------------------------------------
 ###### calculate group means - re-run after running DR because bags will be re-fit
-pew_data[, y_dem_grpmean := NULL]
-pew_data[, y_rep_grpmean := NULL]
-pew_data[, y_oth_grpmean := NULL]
 
 Y_grp_means = fit_wdr$data[surveyed == 1, lapply(.SD, mean), .SDcols = outcome, by = bag]
 setnames(Y_grp_means, c('bag',paste0(outcome, '_grpmean')))
@@ -318,9 +314,66 @@ plot_deciles
 ggsave(filename = paste0(plot_dir, '/plot_deciles.png')
        , plot = plot_deciles, device = 'png', width = 10, height = 6)
 
+
+
+##### PLOT: Check calibration
+
+ggplot(plot_data_melted[, .(.N, actual_pct = mean(actual_ind) * 100), .(model, variable, score = floor(value * 100))]) +
+  geom_abline(slope = 1, intercept = 0, color = 'grey') +
+  geom_point(aes(x = score,  y = actual_pct, size = N, alpha = 0.2)) +
+  facet_grid(variable ~ model) +
+  ggtitle("Calibration of modeled probabilities") +
+  xlab("Modeled probability") +
+  ylab("Actual %")
+
+
+#### PLOT: ROC curves
+ggroc <- ggplot(rocdata, aes(m = M, d = D)) + geom_roc()
+calc_auc(ggroc)
+
+plot_roc = ggplot(plot_data_melted) + 
+  geom_roc(n.cuts = 0, aes(d = actual_ind, m = value, color = model)) + facet_grid(~variable)
+roc_text = calc_auc(plot_roc)
+roc_text$model = rep(sort(models), 3)
+roc_text$variable = sort(rep(unique(plot_data_melted$variable), length(unique(plot_data_melted$model))))
+roc_text$label = paste0(roc_text$model, ": ", round(roc_text$AUC, 3))
+roc_text
+
+plot_roc = plot_roc + geom_text(data = roc_text, aes(x = 1, y = (8-group)/20, label = label, hjust = 1), size = 3) +
+  ggtitle("Model ROC curves") + xlab("False positive rate") + ylab("True postitive rate")
+plot_roc
+
+ggsave(filename = paste0(plot_dir, '/plot_roc.png')
+       , plot = plot_roc, device = 'png', width = 10, height = 6)
+
+
 #------------------------------------------------------------------------
 ##### XTABS
 
+models = unique(plot_data$model)
+vars = c(' topline', file_and_survey_vars[!(file_and_survey_vars == 'demo_state')])
+
+
+## Do xtabs of score
+score_xtabs = lapply(models, function(m){
+  temp = cbind(' topline' = 1, pew_data, plot_data[model == m,])[holdout == 1, ]
+  temp$p_class <- c('1-Dem', '2-Rep', '3-Other')[apply(temp[, .(`P(Dem)`,`P(Rep)`,`P(Other)`)], 1, which.max)]
+  
+  temp = rbindlist(lapply(vars, function(v){
+    cbind(v, temp[, .(y_hat_dem = mean(`P(Dem)`)
+                      , y_hat_rep = mean(`P(Rep)`)
+                      , y_hat_oth = mean(`P(Other)`)
+                      , y_hat_dem_2way = sum(`P(Dem)`)/sum(`P(Dem)` + `P(Rep)`)
+                      , class_rate = mean(p_class == actual)
+    ), by = get(v)])
+  }))
+  setnames(temp, c('var', 'level', paste0('y_hat_', m, c('_dem', '_rep', '_oth', '_dem_2way')), paste0('class_rate_', m)))
+})
+
+score_xtabs = Reduce(function(d1, d2) merge(d1, d2, by = c('var', 'level'), all = T), score_xtabs)
+
+
+## do xtabs of raw data
 getXtab = function(var, data){
   tab = data[, .(.N
                      , prop_surveyed = mean(surveyed)
@@ -333,62 +386,55 @@ getXtab = function(var, data){
                  , matched_y_dem = sum(y_dem * matched)/sum(matched)
                  , voterfile_y_dem = sum(y_dem * voterfile * (matched == 0))/sum(voterfile * (matched == 0))
                      
-                     , test_y_dem = sum(y_dem * holdout)/sum(holdout)
-                     , test_y_dem_dr = sum(y_dem_hat * holdout)/sum(holdout)
-                     , test_y_dem_logit = sum(y_dem_logit * holdout)/sum(holdout)
-                     , test_y_dem_grpmean = sum(y_dem_grpmean * holdout)/sum(holdout)
-                     
-                     , test_y_rep = sum(y_rep * holdout)/sum(holdout)
-                     , test_y_rep_dr = sum(y_rep_hat * holdout)/sum(holdout)
-                     , test_y_rep_logit = sum(y_rep_logit * holdout)/sum(holdout)
-                     , test_y_rep_grpmean = sum(y_rep_grpmean * holdout)/sum(holdout)
-                     
-                     , test_y_oth = sum(y_oth * holdout)/sum(holdout)
-                     , test_y_oth_dr = sum(y_oth_hat * holdout)/sum(holdout)
-                     , test_y_oth_logit = sum(y_oth_logit * holdout)/sum(holdout)
-                     , test_y_oth_grpmean = sum(y_oth_grpmean * holdout)/sum(holdout)
-                 
-                 , test_y_dem_2way = sum(y_dem * holdout)/sum(holdout * as.numeric(y_dem + y_rep > 0))
-                 , test_y_dem_2way_dr = sum(y_dem_hat * holdout)/sum(holdout * as.numeric(y_dem + y_rep > 0))
-                 , test_y_dem_2way_logit = sum(y_dem_logit * holdout)/sum(holdout * as.numeric(y_dem + y_rep > 0))
-                 , test_y_dem_2way_grpmean = sum(y_dem_grpmean * holdout)/sum(holdout * as.numeric(y_dem + y_rep > 0))
-                 
-                 , test_class_dr = sum((support == class_dr) * holdout)/sum(holdout)
-                 , test_class_logit = sum((support == class_logit) * holdout)/sum(holdout)
-                 , test_class_grpmean = sum((support == class_grpmean) * holdout)/sum(holdout)
+                     , y_dem = sum(y_dem * holdout)/sum(holdout)
+                     , y_rep = sum(y_rep * holdout)/sum(holdout)
+                     , y_oth = sum(y_oth * holdout)/sum(holdout)
+                 , y_dem_2way = sum(y_dem * holdout)/sum(holdout * as.numeric(y_dem + y_rep > 0))
                      
   ), by = get(var)]
-  
-  tab[, error_dem_dr := test_y_dem_dr - test_y_dem]
-  tab[, error_dem_logit := test_y_dem_logit - test_y_dem]
-  tab[, error_dem_grpmean := test_y_dem_grpmean - test_y_dem]
-  
-  tab[, error_rep_dr := test_y_rep_dr - test_y_rep]
-  tab[, error_rep_logit := test_y_rep_logit - test_y_rep]
-  tab[, error_rep_grpmean := test_y_rep_grpmean - test_y_rep]
-  
-  tab[, error_oth_dr := test_y_oth_dr - test_y_oth]
-  tab[, error_oth_logit := test_y_oth_logit - test_y_oth]
-  tab[, error_oth_grpmean := test_y_oth_grpmean - test_y_oth]
-  
-  tab[, error_dem_2way_dr := test_y_dem_2way_dr - test_y_dem_2way]
-  tab[, error_dem_2way_logit := test_y_dem_2way_logit - test_y_dem_2way]
-  tab[, error_dem_2way_grpmean := test_y_dem_2way_grpmean - test_y_dem_2way]
   
   tab = cbind(var, tab)
   return(tab)
 }
 
-all_tabs = rbindlist(lapply(c(' topline', file_and_survey_vars[-which(file_and_survey_vars == 'demo_state')]), getXtab, data = cbind(' topline' = 1, pew_data)))
+all_tabs = rbindlist(lapply(c(' topline', file_and_survey_vars[!(file_and_survey_vars == 'demo_state')]), getXtab, data = cbind(' topline' = 1, pew_data)))
+setnames(all_tabs, old = c('get'), new = c('level'))
 
-all_tabs[, label_ordered := factor(get, levels = all_tabs[order(test_y_dem)]$get, ordered = T)]
+# combine xtabs
+all_tabs = merge(all_tabs, score_xtabs, by = c('var', 'level'))
+
+
+## GET DIFFS
+
+lapply(models, function(m){
+  all_tabs[, paste0('error_',m,'_dem') := get(paste0('y_hat_', m, '_dem')) - y_dem]
+  all_tabs[, paste0('error_',m,'_rep') := get(paste0('y_hat_', m, '_rep')) - y_dem]
+  all_tabs[, paste0('error_',m,'_oth') := get(paste0('y_hat_', m, '_oth')) - y_dem]
+  all_tabs[, paste0('error_',m,'_dem_2way') := get(paste0('y_hat_', m, '_dem_2way')) - y_dem]
+})
+
+
+head(all_tabs[, c('level', paste0('error_', models, '_dem')), with = F])
+head(all_tabs[, c('level', paste0('error_', models, '_dem_2way')), with = F])
+
+## Plots
+all_tabs[, label_ordered := factor(level, levels = all_tabs[order(y_dem)]$level, ordered = T)]
 all_tabs[order(label_ordered)]
 
-ggplot(all_tabs) +
-  #geom_point(aes(x = error_dem, y = label_ordered, color = 'actual')) + 
-  geom_point(aes(x = error_dem_dr_wt, y = label_ordered, color = 'DRW')) + 
-  geom_point(aes(x = error_dem_dr, y = label_ordered, color = 'DR')) + 
-  geom_point(aes(x = error_dem_logit, y = label_ordered, color = 'logit')) + 
-  geom_point(aes(x = error_dem_grpmean, y = label_ordered, color = 'group mean'))
+p = ggplot(all_tabs)
+
+p+ geom_point(aes(x = get(paste0('y_hat_logit_dem')), y = label_ordered))
+
+lapply(models, function(m){
+  p = p + geom_point(aes(x = get(paste0('error_', m, '_dem')), y = label_ordered))
+})
+p
+
+
+
+
+
+
+
 
 
