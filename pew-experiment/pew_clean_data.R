@@ -70,18 +70,18 @@ ggplot(data_recoded, aes(x = p_surveyed, y = p_matched)) + geom_point() + ggtitl
 
 
 # few more recodes
-pew_data[y_dem == 1, support := '1-Dem']
-pew_data[y_rep == 1, support := '2-Rep']
-pew_data[y_oth == 1, support := '3-Other']
+data_recoded[y_dem == 1, support := '1-Dem']
+data_recoded[y_rep == 1, support := '2-Rep']
+data_recoded[y_oth == 1, support := '3-Other']
 
 
 # mean impute age
-pew_data[, age_num_imp := as.numeric(age_num)]
-pew_data[is.na(age_num_imp), age_num_imp := mean(pew_data$age_num, na.rm = T)]
-summary(pew_data[, age_num_imp])
+data_recoded[, age_num_imp := as.numeric(age_num)]
+data_recoded[is.na(age_num_imp), age_num_imp := mean(data_recoded$age_num, na.rm = T)]
+summary(data_recoded[, age_num_imp])
 
 #scale age
-pew_data[, age_scaled := scale(age_num_imp)/5]
+data_recoded[, age_scaled := scale(age_num_imp)/5]
 
 # write to CSV
-write.csv(data_recoded, file = 'data/pew_data.csv', row.names = F)
+write.csv(data_recoded, file = 'data/data_recoded.csv', row.names = F)
