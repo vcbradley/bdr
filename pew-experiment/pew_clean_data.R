@@ -68,5 +68,20 @@ data_recoded[, .(.N, mean(p_matched)), demo_age_bucket][order(demo_age_bucket)]
 
 ggplot(data_recoded, aes(x = p_surveyed, y = p_matched)) + geom_point() + ggtitle("P(matched) v. P(surveyed)")
 
+
+# few more recodes
+pew_data[y_dem == 1, support := '1-Dem']
+pew_data[y_rep == 1, support := '2-Rep']
+pew_data[y_oth == 1, support := '3-Other']
+
+
+# mean impute age
+pew_data[, age_num_imp := as.numeric(age_num)]
+pew_data[is.na(age_num_imp), age_num_imp := mean(pew_data$age_num, na.rm = T)]
+summary(pew_data[, age_num_imp])
+
+#scale age
+pew_data[, age_scaled := scale(age_num_imp)/5]
+
 # write to CSV
 write.csv(data_recoded, file = 'data/pew_data.csv', row.names = F)

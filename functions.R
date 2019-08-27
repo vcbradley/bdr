@@ -480,7 +480,7 @@ getFeatures = function(data, bag, train_ind, landmarks, kernel_type = 'rbf', sig
   return(list(mu_hat = mu_hat_train, phi_x = phi_x))
 }
 
-fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian'){
+fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian', alpha = 1){
   
   # fit once to get non-zero coefs
   # cat(dim(mu_hat))
@@ -497,7 +497,7 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
     mu_hat_mat = mu_hat
   }
   
-  fit_lambda = cv.glmnet(x = mu_hat_mat, y = Y_bag, nfolds = nfolds, family = family)
+  fit_lambda = cv.glmnet(x = mu_hat_mat, y = Y_bag, nfolds = nfolds, family = family, alpha = alpha)
   if(family == 'gaussian'){
     nonzero_ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)  # drop intercept term
   }else{
@@ -520,7 +520,7 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
   #  cat('\n')
   
   # refit to avoid shrinkage
-  fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family)
+  fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family, alpha = alpha)
   
   if(!is.null(phi_x)){
     Y_hat = predict(fit, newx = as.matrix(phi_x)[, nonzero_ind], type = 'response')
