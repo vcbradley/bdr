@@ -7,17 +7,38 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(R.utils)
+library(plotROC)
+
+sourceDirectory('~/github/bdr/utils/')
+
+plot_dir = '~/github/bdr/pew-experiment/plots/'
 ```
 
 # Load results and data
 ```{r}
+load('~/github/bdr/pew-experiment/results/results_20180828.RData')
 
+outcome = gsub('_hat', '', names(results[[1]]))
 ```
 
-# Make Crosstabs
 ```{r}
+###### PREP plot data
+plot_data = rbindlist(lapply(names(results), function(r_lab){
+  cbind(model = r_lab, results[[r_lab]], pew_data[, .(support, holdout)])
+}))
+setnames(plot_data, c('model', 'P(Dem)', 'P(Rep)', 'P(Other)', 'actual', 'holdout'))
+plot_data
+plot_data_melted = melt(plot_data, id.vars = c('model', 'actual', 'holdout'))
+#cbind(plot_data_melted, actual = rep(pew_data[, support], length(unique(plot_data_melted$model)) * 3))
+```
+
+
+# Make Crosstabs
+```{r xtabs,  results = 'hide'}
 models = names(results)
-vars = c(' topline', file_and_survey_vars[!(file_and_survey_vars == 'demo_state')])
+xtab_vars = c(' topline', vars$file_and_survey[!(vars$file_and_survey == 'demo_state')])
 
 
 ## Do xtabs of score
@@ -25,7 +46,7 @@ score_xtabs = lapply(models, function(m){
   temp = cbind(' topline' = 1, pew_data, plot_data[model == m,])[holdout == 1, ]
   temp$p_class <- c('1-Dem', '2-Rep', '3-Other')[apply(temp[, .(`P(Dem)`,`P(Rep)`,`P(Other)`)], 1, which.max)]
   
-  temp = rbindlist(lapply(vars, function(v){
+  temp = rbindlist(lapply(xtab_vars, function(v){
     cbind(v, temp[, .(y_hat_dem = mean(`P(Dem)`)
                       , y_hat_rep = mean(`P(Rep)`)
                       , y_hat_oth = mean(`P(Other)`)
@@ -63,7 +84,7 @@ getXtab = function(var, data){
   return(tab)
 }
 
-all_tabs = rbindlist(lapply(c(' topline', file_and_survey_vars[!(file_and_survey_vars == 'demo_state')]), getXtab, data = cbind(' topline' = 1, pew_data)))
+all_tabs = rbindlist(lapply(xtab_vars, getXtab, data = cbind(' topline' = 1, pew_data)))
 setnames(all_tabs, old = c('get'), new = c('level'))
 
 # combine xtabs
@@ -79,15 +100,14 @@ lapply(models, function(m){
   all_tabs[, paste0('error_',m,'_dem_2way') := get(paste0('y_hat_', m, '_dem_2way')) - y_dem]
 })
 
-
-head(all_tabs[, c('level', 'y_dem', paste0('y_hat_', models, '_dem')), with = F])
-head(all_tabs[, c('level', paste0('error_', models, '_dem')), with = F])
-head(all_tabs[, c('level', paste0('error_', models, '_dem_2way')), with = F])
-
-## Plots
-all_tabs[, label_ordered := factor(level, levels = all_tabs[order(y_dem)]$level, ordered = T)]
-all_tabs[order(label_ordered)]
 ```
+
+```{r}
+all_tabs[, c('level', 'y_dem', paste0('y_hat_', models, '_dem')), with = F]
+all_tabs[, c('level', paste0('error_', models, '_dem')), with = F]
+all_tabs[, c('level', paste0('error_', models, '_dem_2way')), with = F]
+```
+
 
 
 # Check MSE
@@ -101,11 +121,11 @@ tab_mse = data.table(cbind(model = names(tab_mse), MSE = round(unlist(tab_mse), 
 tab_mse[order(model)]
 ```
 
-# Check classification rate
+# Check classification rate in holdout set
 ```{r}
 ### classification rates
 tab_classrate = lapply(results, function(r){
-  mean(pew_data$support == c('1-Dem', '2-Rep', '3-Other')[apply(r, 1, which.max)])
+  mean((pew_data$support == c('1-Dem', '2-Rep', '3-Other')[apply(r, 1, which.max)])[pew_data$holdout == 1])
 })
 tab_classrate = data.table(cbind(model = names(tab_classrate), 'Classification Rate' = round(unlist(tab_classrate), 4)))
 tab_classrate[order(model)]
@@ -125,15 +145,6 @@ data.table(models
 
 # Plots
 ```{r}
-###### PREP plot data
-plot_data = rbindlist(lapply(names(results), function(r_lab){
-  cbind(model = r_lab, results[[r_lab]], pew_data[, .(support, holdout)])
-}))
-setnames(plot_data, c('model', 'P(Dem)', 'P(Rep)', 'P(Other)', 'actual', 'holdout'))
-plot_data
-plot_data_melted = melt(plot_data, id.vars = c('model', 'actual', 'holdout'))
-#cbind(plot_data_melted, actual = rep(pew_data[, support], length(unique(plot_data_melted$model)) * 3))
-
 # add jitter for unique breaks
 plot_data_melted[, value := value + rnorm(nrow(plot_data_melted), 0, 0.000000001)]
 plot_data_melted = plot_data_melted[, .(actual, holdout, value, score_decile = cut(value, breaks = quantile(value, probs = seq(0,1,0.1)), labels = 1:10, include.lowest = T))
@@ -150,10 +161,10 @@ plot_pred_probs = ggplot(plot_data_melted, aes(x = value, color = actual)) + geo
                      name="Actual Support") +
   ggtitle("Model predicted probs by actual respondent support")+
   xlab("Predicted probability")
-plot_pred_probs
 
 ggsave(filename = paste0(plot_dir, '/plot_pred_probs.png')
        , plot = plot_pred_probs, device = 'png', width = 10, height = 6)
+plot_pred_probs
 ```
 
 
@@ -202,23 +213,5 @@ ggsave(filename = paste0(plot_dir, '/plot_roc.png')
 ```
 
 
-```{r}
-
-#------------------------------------------------------------------------
-##### XTABS
-
-p = ggplot(all_tabs)
-
-p+ geom_point(aes(x = get(paste0('y_hat_logit_dem')), y = label_ordered))
-
-lapply(models, function(m){
-  p = p + geom_point(aes(x = get(paste0('error_', m, '_dem')), y = label_ordered))
-})
-p
-
-
-
-
-```
 
 
