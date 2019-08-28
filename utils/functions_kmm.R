@@ -1,7 +1,7 @@
 
 doKMM = function(X_trn, X_tst
-                 , B = 1
                  , kernel_params
+                 , B = 1
 ){
   require(Matrix)
   require(kernlab)
@@ -18,11 +18,11 @@ doKMM = function(X_trn, X_tst
   
   eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
   
-  K = getCustomKern(X_trn, kernel_params)
+  K = getCustomKern(X_trn, kernel_params = kernel_params)
   # fix to make sure we can use Cholesky decomp
   newK = nearPD(K)$mat
   
-  kappa = getCustomKern(X_trn, X_tst, kernel_params)
+  kappa = getCustomKern(X_trn, X_tst, kernel_params = kernel_params)
   kappa = (n_trn/n_tst) * rowSums(kappa)
   
   G = as.matrix(rbind(- rep(1, n_trn)
@@ -43,9 +43,11 @@ doKMM = function(X_trn, X_tst
 
 
 
-getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
+getWeights = function(data, vars, train_ind, target_ind
+                      , kernel_type
+                      , weight_col = NULL
                       , B = 1
-                      , kernel_params
+                      , sigma = NULL
 ){
   
   fmla = as.formula(paste0('~ -1 +', paste(vars, collapse = '+')))
@@ -56,13 +58,30 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
     X = diag(data[, get(weight_col)]) %*% X
   }
   
-  X_train = X[which(data[, get(train_ind)] == 1),]    # data to weight
-  X_target = X[which(data[, get(target_ind)] == 1),]  # target
+  X_train = as.matrix(X[which(data[, get(train_ind)] == 1),])    # data to weight
+  X_target = as.matrix(X[which(data[, get(target_ind)] == 1),])  # target
   
+  
+  ## SET KERNEL
+  if(kernel_type == 'linear'){
+    kernel_params = list(linear_ind = 1:ncol(X_train))
+  }else if(kernel_type == 'rbf'){
+    kernel_params = list(rbf_ind = 1:ncol(X_train))
+    kernel_params$sigma = sigma
+  }else if(kernel_type == 'rbf_age'){
+    kernel_params = list(lin_ind = which(!colnames(X_train) == 'age_scaled')
+                         , rbf_ind = which(colnames(X_train) == 'age_scaled'))
+    kernel_params$sigma = sigma
+  }else{
+    stop("Kernel type not supported")
+  }
+  
+  
+  # GET WEIGHTS
   weighted = doKMM(X_trn = X_train
                    , X_tst = X_target
                    , B = B
-                   , kernel_params
+                   , kernel_params = kernel_params
                    )
   
   # calculate weights
