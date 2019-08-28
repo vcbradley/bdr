@@ -1,3 +1,27 @@
+getKernParams = function(X, kernel_type, sigma = NULL){
+  kernel_params = list()
+  
+  if(is.null(sigma) & kernel_type %in% c('rbf', 'rbf_age')){
+    stop("You must supply sigma ")
+  } 
+  
+  if(kernel_type %in% c('rbf', 'rbf_age')){
+    kernel_params[['sigma']] = sigma
+  }
+  
+  if(kernel_type == 'linear'){
+    kernel_params[['linear_ind']] = 1:ncol(X)
+  }else if(kernel_type == 'rbf'){
+    kernel_params[['rbf_ind']] = 1:ncol(X)
+  }else if(kernel_type == 'rbf_age'){
+    kernel_params[['lin_ind']] = which(!colnames(X) == 'age_scaled')
+    kernel_params[['rbf_ind']] = which(colnames(X) == 'age_scaled')
+  }else{
+    stop("Kernel type not supported")
+  }
+  
+  return(kernel_params)
+}
 
 # create a custom kernel that is a combination of linear, matern and RBF kernels
 getCustomKern = function(X, Y = NULL, kernel_params){
@@ -11,6 +35,7 @@ getCustomKern = function(X, Y = NULL, kernel_params){
   
   k_rows = nrow(X)
   k_cols = nrow(Y)
+  print(paste(k_rows, k_cols))
   
   if(!is.null(kernel_params$linear_ind)){
     kern_lin = vanilladot()
@@ -44,7 +69,7 @@ getCustomKern = function(X, Y = NULL, kernel_params){
   
   K_full = K_lin + K_rbf + K_matern
   
-  return(K_new)
+  return(K_full)
 }
 
 
