@@ -1,7 +1,7 @@
 
 doKMM = function(X_trn, X_tst
                  , kernel_params
-                 , B = 1
+                 , B = c(1,1)
 ){
   require(Matrix)
   require(kernlab)
@@ -16,7 +16,7 @@ doKMM = function(X_trn, X_tst
     n_tst = nrow(X_tst)
   }
   
-  eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
+  eps = B[2]/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
   
   K = getCustomKern(X_trn, kernel_params = kernel_params)
   # fix to make sure we can use Cholesky decomp
@@ -32,8 +32,8 @@ doKMM = function(X_trn, X_tst
   ))
   h = c(- n_trn * (1 + eps)
         , n_trn * (1 - eps)
-        , - B * rep(1, n_trn)
-        , rep(0, n_trn)
+        , - B[2] * rep(1, n_trn)
+        , rep(B[1], n_trn)  # lower bound on the weights
   )
   
   sol = solve.QP(Dmat = newK, dvec = kappa, Amat = t(G), bvec = h)
@@ -46,7 +46,7 @@ doKMM = function(X_trn, X_tst
 getWeights = function(data, vars, train_ind, target_ind
                       , kernel_type
                       , weight_col = NULL
-                      , B = 1
+                      , B = c(1,1)
                       , sigma = NULL
 ){
   
