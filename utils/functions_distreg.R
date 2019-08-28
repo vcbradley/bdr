@@ -75,17 +75,12 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
   return(list(landmarks = landmarks, X = X))
 }
 
-getFeatures = function(data, bag, train_ind, landmarks, kernel_type = 'rbf', sigma){
-  
-  # create kernel
-  if(kernel_type == 'rbf'){
-    kern = rbfdot(sigma = sigma)
-  } else if(kernel_type == 'linear'){
-    kern = vanilladot()
-  }
+
+
+getFeatures = function(data, bag, train_ind, landmarks, kernel_params){
   
   # calculate features for train
-  phi_x = kernelMatrix(kern, x = as.matrix(data), y = landmarks)
+  phi_x = getCustomKern(X = as.matrix(data), Y = landmarks, kernel_params = kernel_params)
   phi_x = data.table(bag = bag, phi_x)
   setnames(phi_x, c('bag', paste0('u', 1:nrow(landmarks))))
   
@@ -94,6 +89,8 @@ getFeatures = function(data, bag, train_ind, landmarks, kernel_type = 'rbf', sig
   
   return(list(mu_hat = mu_hat_train, phi_x = phi_x))
 }
+
+
 
 fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian', alpha = 1){
   
@@ -154,15 +151,14 @@ doBasicDR = function(data
                      , score_bags_vars
                      , regression_vars
                      , outcome
+                     , kernel_params
                      , n_bags = NULL
                      , n_landmarks = NULL
-                     , sigma = NULL
                      , family = 'gaussian'
                      , bagging_ind = 'surveyed'
                      , train_ind = 'voterfile'
                      , test_ind = 'holdout'
                      , weight_col = NULL
-                     , kernel_type = 'rbf'
                      , landmarks = NULL
                      , bags = NULL
 ){
@@ -211,8 +207,7 @@ doBasicDR = function(data
                          , bag = as.numeric(data[, bag])
                          , train_ind = as.numeric(data[, get(train_ind)])
                          , landmarks = landmarks$landmarks
-                         , sigma = sigma
-                         , kernel_type = kernel_type)
+                         , kernel_params = kernel_params)
   
   
   # prep outcome
@@ -288,35 +283,4 @@ doDecilePlot = function(data, score_name, title = NULL){
     
   return(plot)
 }
-
-### replacing with nearPD from the Matrix package
-# ridgeMat = function(origMat){
-#   cholStatus <- try(u <- chol(origMat), silent = TRUE)
-#   cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
-#   
-#   newMat <- origMat
-#   iter <- 0
-#   while (cholError) {
-#     
-#     iter <- iter + 1
-#     cat("iteration ", iter, "\n")
-#     
-#     # replace -ve eigen values with small +ve number
-#     newEig <- eigen(newMat)
-#     newEig2 <- newEig$values + 2 *abs(min(newEig$values))# + 1e-10  # add in the min eigenvalue
-#     #newEig2 <- ifelse(newEig$values < 1e-10, 1e-10, newEig$values)
-#     
-#     # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
-#     # eig vectors
-#     newMat <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
-#     
-#     # normalize modified matrix eqn 6 from Brissette et al 2007
-#     newMat <- newMat/sqrt(diag(newMat) %*% t(diag(newMat)))
-#     
-#     # try chol again
-#     cholStatus <- try(u <- chol(newMat), silent = TRUE)
-#     cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
-#   }
-#   return(newMat)
-# }
 

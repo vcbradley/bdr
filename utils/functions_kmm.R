@@ -45,9 +45,7 @@ doKMM = function(X_trn, X_tst
 
 getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
                       , B = 1
-                      , kernel_type = 'linear'
-                      , sigma = 1  #rbf params
-                      , theta = 1.0, smoothness = 0.5, scale=1 #matern params
+                      , kernel_params
 ){
   
   fmla = as.formula(paste0('~ -1 +', paste(vars, collapse = '+')))
@@ -64,10 +62,8 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
   weighted = doKMM(X_trn = X_train
                    , X_tst = X_target
                    , B = B
-                   , kernel_type = kernel_type
-                   , sigma = sigma
-                   , theta = theta, smoothness = smoothness, scale = scale
-  )  # the smaller sigma is, the more weighting that happens 
+                   , kernel_params
+                   )
   
   # calculate weights
   if(is.null(nrow(X_train))){
@@ -79,3 +75,36 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
   
   return(weights = weighted$weights)
 }
+
+
+### replacing with nearPD from the Matrix package
+# ridgeMat = function(origMat){
+#   cholStatus <- try(u <- chol(origMat), silent = TRUE)
+#   cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+#   
+#   newMat <- origMat
+#   iter <- 0
+#   while (cholError) {
+#     
+#     iter <- iter + 1
+#     cat("iteration ", iter, "\n")
+#     
+#     # replace -ve eigen values with small +ve number
+#     newEig <- eigen(newMat)
+#     newEig2 <- newEig$values + 2 *abs(min(newEig$values))# + 1e-10  # add in the min eigenvalue
+#     #newEig2 <- ifelse(newEig$values < 1e-10, 1e-10, newEig$values)
+#     
+#     # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
+#     # eig vectors
+#     newMat <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
+#     
+#     # normalize modified matrix eqn 6 from Brissette et al 2007
+#     newMat <- newMat/sqrt(diag(newMat) %*% t(diag(newMat)))
+#     
+#     # try chol again
+#     cholStatus <- try(u <- chol(newMat), silent = TRUE)
+#     cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+#   }
+#   return(newMat)
+# }
+
