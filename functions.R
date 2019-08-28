@@ -717,8 +717,14 @@ doKMM = function(X_trn, X_tst
   require(fields)
   require(quadprog)
   
-  n_trn = nrow(X_trn)
-  n_tst = nrow(X_tst)
+  if(is.null(ncol(X_trn))){
+    n_trn = length(X_trn)
+    n_tst = length(X_tst)
+  }else{
+    n_trn = nrow(X_trn)
+    n_tst = nrow(X_tst)
+  }
+  
   
   eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
   
