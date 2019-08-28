@@ -796,7 +796,12 @@ getWeights = function(data, vars, train_ind, target_ind, weight_col = NULL
                     )  # the smaller sigma is, the more weighting that happens 
   
   # calculate weights
-  weighted$weights = (nrow(X_train)/sum(weighted$solution)) * weighted$solution
+  if(is.null(nrow(X_train))){
+    n_train = length(X_train)
+  }else{
+    n_train = nrow(X_train)
+  }
+  weighted$weights = (n_train/sum(weighted$solution)) * weighted$solution
   
   return(weights = weighted$weights)
 }
