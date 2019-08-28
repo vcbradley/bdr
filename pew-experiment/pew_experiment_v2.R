@@ -5,13 +5,10 @@ library(gridExtra)
 library(ggplot2)
 library(Rfast)
 library(kernlab)
-library(plotROC)
 library(R.utils)
 
 setwd('~/github/bdr')
 x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
-
-plot_dir = '~/github/bdr/pew-experiment/plots/'
 
 # read in *recoded* data
 pew_data = fread('data/data_recoded.csv')
@@ -45,44 +42,30 @@ pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 ################################
 
 #B = 5.0  # upper bound; B = 1 is the unweighted solution
-#sigma = 0.25
 
 pew_data[, kmm_weight := 1]
-
-# weight JUST for age
-w_age = getWeights(data = pew_data
-                   , vars = 'age_scaled'
-                   , train_ind = 'matched'
-                   , target_ind = 'voterfile'
-                   , kernel_type = 'rbf'  # marginals won't match with RBF kernel, but weights are too extreme with linear
-                   , sigma = 0.2  #setting based on median distance
-                   , B = 3)
-
-pew_data[matched == 1, kmm_weight := w_age]
-
-ggplot(pew_data[matched == 1, .(mean_wt = mean(kmm_weight)), age_scaled], aes(x = age_scaled, y = mean_wt)) + geom_point()
 
 # weight non-age file vars
 w_matched = getWeights(data = pew_data
                        , vars = c(vars$file_and_survey, vars$file_only)
                        , train_ind = 'matched'
                        , target_ind = 'voterfile'
-                       , weight_col = 'kmm_weight'
-                       , kernel_type = 'linear'  # marginals won't match with RBF kernel, but weights are too extreme with linear
-                       , sigma = 0.2
-                       , B = 3)
+                       , kernel_type = 'rbf_age' # marginals won't match with RBF kernel, but weights are too extreme with linear
+                       , sigma = 0.1
+                       , B = c(0.1, 5))
 hist(w_matched)
 summary(w_matched)
 
+# set weights
 pew_data[matched == 1, kmm_weight := w_matched]
 
 w_unmatched = getWeights(data = pew_data
-                         , vars = c(file_and_survey_vars, survey_vars)
+                         , vars = c(vars$file_and_survey, vars$survey)
                          , train_ind = 'unmatched'
                          , target_ind = 'matched'
                          , weight_col = 'kmm_weight'
                          , kernel_type = 'linear' #important for weighting so that marginals match
-                         , B = 5)
+                         , B = c(0.01, 7))
 hist(w_unmatched)
 summary(w_unmatched)
 
@@ -92,59 +75,11 @@ hist(pew_data$kmm_weight)
 summary(pew_data$kmm_weight)
 
 # check that distributions match ok
-rbindlist(lapply(c(file_and_survey_vars), function(v){
+rbindlist(lapply(c(vars$file_and_survey), function(v){
   cbind(v, pew_data[, .(dist_vf = sum(voterfile * kmm_weight)/sum(pew_data$voterfile)
                         , dist_matched = sum(matched * kmm_weight)/sum(pew_data$matched)
                         , dist_unmatched = sum(unmatched * kmm_weight)/sum(pew_data$unmatched)
-  ), get(v)])
-}))[order(v, get)]
-
-
-#------------------------------------------------------------------------
-################################
-######### WEIGHT DATA - LINEAR ##########
-################################
-
-#B = 5.0  # upper bound; B = 1 is the unweighted solution
-#sigma = 0.25
-
-pew_data[, lin_weight := 1]
-
-w_matched = getWeights(data = pew_data
-                       , vars = c(file_and_survey_vars, file_only_vars)
-                       , train_ind = 'matched'
-                       , target_ind = 'voterfile'
-                       , kernel_type = 'rbf'  # marginals won't match with RBF kernel, but weights are too extreme with linear
-                       , sigma = 0.3
-                       , B = 3)
-hist(w_matched)
-summary(w_matched)
-pew_data[matched == 1, lin_weight := w_matched]
-
-ggplot(pew_data[matched == 1, .(mean_wt = mean(lin_weight)), age][order(age)], aes(x = age, y = mean_wt)) + geom_point()
-
-
-
-w_unmatched = getWeights(data = pew_data
-                         , vars = c(file_and_survey_vars, survey_vars)
-                         , train_ind = 'unmatched'
-                         , target_ind = 'matched'
-                         , weight_col = 'lin_weight'
-                         , kernel_type = 'linear' #important for weighting so that marginals match
-                         , B = 5)
-hist(w_unmatched)
-summary(w_unmatched)
-
-pew_data[unmatched == 1, lin_weight := w_unmatched]
-
-hist(pew_data$lin_weight)
-summary(pew_data$lin_weight)
-
-# check that distributions match ok
-rbindlist(lapply(c(file_and_survey_vars), function(v){
-  cbind(v, pew_data[, .(dist_vf = sum(voterfile * lin_weight)/sum(pew_data$voterfile)
-                        , dist_matched = sum(matched * lin_weight)/sum(pew_data$matched)
-                        , dist_unmatched = sum(unmatched * lin_weight)/sum(pew_data$unmatched)
+                        , dist_both = sum((matched + unmatched) * kmm_weight)/sum(pew_data$unmatched + pew_data$matched)
   ), get(v)])
 }))[order(v, get)]
 
@@ -154,7 +89,7 @@ rbindlist(lapply(c(file_and_survey_vars), function(v){
 ############ FIT MODELS ###########
 ###################################
 
-regression_vars = c(file_and_survey_vars, file_only_vars)
+regression_vars = c(vars$file_and_survey, vars$file_only)
 n_landmarks = 200
 n_bags = 75
 results = list()
@@ -167,15 +102,15 @@ landmarks = getLandmarks(data = pew_data
 
 ## fix bags
 bags = getBags(data = pew_data[surveyed == 1,]
-               , vars = file_and_survey_vars
+               , vars = vars$file_and_survey
                , n_bags = n_bags
-               , newdata = pew_data[, file_and_survey_vars, with = F])
+               , newdata = pew_data[, vars$file_and_survey, with = F])
 
 # give each matched data point its own bag
 # bags_unm = getBags(data = pew_data[unmatched == 1,]
-#                , vars = file_and_survey_vars
+#                , vars = vars$file_and_survey
 #                , n_bags = n_bags
-#                , newdata = pew_data[, file_and_survey_vars, with = F])
+#                , newdata = pew_data[, vars$file_and_survey, with = F])
 bags_unm = bags
 bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew_data$matched))
 
@@ -183,12 +118,12 @@ bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew
 ### fit DR -- WEIGHTED
 outcome = c('y_dem', 'y_rep', 'y_oth')
 fit_wdr = doBasicDR(data = pew_data
-                    , make_bags_vars = file_and_survey_vars
-                    , score_bags_vars = file_and_survey_vars
+                    , make_bags_vars = vars$file_and_survey
+                    , score_bags_vars = vars$file_and_survey
                     , regression_vars = regression_vars
                     , outcome = outcome
                     , n_bags = n_bags
-                    #, n_landmarks = 300
+                    , kernel_type = 'rbf'
                     , sigma = 0.01
                     , family = 'multinomial'
                     , bagging_ind = 'surveyed'
@@ -203,8 +138,8 @@ results[['wdr']] = fit_wdr$y_hat
 
 ### fit DR -- Linear
 fit_dr_linear = doBasicDR(data = pew_data
-                          , make_bags_vars = file_and_survey_vars
-                          , score_bags_vars = file_and_survey_vars
+                          , make_bags_vars = vars$file_and_survey
+                          , score_bags_vars = vars$file_and_survey
                           , regression_vars = regression_vars
                           , outcome = outcome
                           , n_bags = n_bags
@@ -221,8 +156,8 @@ results[['dr_linear']] = fit_dr_linear$y_hat
 
 ### fit DR -- weighted & Linear
 fit_wdr_linear = doBasicDR(data = pew_data
-                           , make_bags_vars = file_and_survey_vars
-                           , score_bags_vars = file_and_survey_vars
+                           , make_bags_vars = vars$file_and_survey
+                           , score_bags_vars = vars$file_and_survey
                            , regression_vars = regression_vars
                            , outcome = outcome
                            #, n_bags = n_bags
@@ -242,8 +177,8 @@ results[['wdr_linear']] = fit_wdr_linear$y_hat
 
 ### fit DR - NO WEIGHTING
 fit_dr = doBasicDR(data = pew_data
-                   , make_bags_vars = file_and_survey_vars
-                   , score_bags_vars = file_and_survey_vars
+                   , make_bags_vars = vars$file_and_survey
+                   , score_bags_vars = vars$file_and_survey
                    , regression_vars = regression_vars
                    , outcome = outcome
                    , n_bags = n_bags
@@ -262,8 +197,8 @@ results[['dr']] = fit_dr$y_hat
 
 ### fit DR - matched own bags
 fit_dr_sepbags = doBasicDR(data = pew_data
-                           , make_bags_vars = file_and_survey_vars
-                           , score_bags_vars = file_and_survey_vars
+                           , make_bags_vars = vars$file_and_survey
+                           , score_bags_vars = vars$file_and_survey
                            , regression_vars = regression_vars
                            , outcome = outcome
                            , n_bags = n_bags
@@ -297,7 +232,7 @@ results[['grpmean']] = Y_grp_means[, -1]
 
 #------------------------------------------------------------------------
 ## Basic LASSO
-lasso_frmla = as.formula(paste0("~", paste(c(file_and_survey_vars, file_only_vars), collapse = '+')))
+lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
 X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
 
 lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
@@ -312,3 +247,6 @@ pew_data[, c('y_dem_logit', 'y_rep_logit', 'y_oth_logit') :=
 results[['logit']] = pew_data[, c('y_dem_logit', 'y_rep_logit', 'y_oth_logit'), with = F]
 
 
+#------------------------------------------------------------------------
+## Write out results
+save(results, vars, pew_data, file = 'pew-experiment/results/results_partyonfile.RData')
