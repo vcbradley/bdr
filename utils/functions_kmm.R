@@ -63,19 +63,7 @@ getWeights = function(data, vars, train_ind, target_ind
   
   
   ## SET KERNEL
-  if(kernel_type == 'linear'){
-    kernel_params = list(linear_ind = 1:ncol(X_train))
-  }else if(kernel_type == 'rbf'){
-    kernel_params = list(rbf_ind = 1:ncol(X_train))
-    kernel_params$sigma = sigma
-  }else if(kernel_type == 'rbf_age'){
-    kernel_params = list(lin_ind = which(!colnames(X_train) == 'age_scaled')
-                         , rbf_ind = which(colnames(X_train) == 'age_scaled'))
-    kernel_params$sigma = sigma
-  }else{
-    stop("Kernel type not supported")
-  }
-  
+  kernel_params = getKernParams(X = X_train, sigma = sigma)
   
   # GET WEIGHTS
   weighted = doKMM(X_trn = X_train
