@@ -706,11 +706,57 @@ doDecilePlot = function(data, score_name, title = NULL){
 # }
 
 
+# create a custom kernel that is a combination of linear, matern and RBF kernels
+getCustomKern = function(X, Y = NULL, kernel_params){
+  require(kernlab)
+  require(Matrix)
+  require(fields)
+  
+  if(is.null(Y)){
+    Y = X
+  }
+  
+  k_rows = nrow(X)
+  k_cols = nrow(Y)
+  
+  if(!is.null(kernel_params$linear_ind)){
+    kern_lin = vanilladot()
+    K_lin = kernelMatrix(kern_lin, matrix(X[, kernel_params$linear_ind]), matrix(Y[, kernel_params$linear_ind]))
+  }else{
+    K_lin = matrix(0, k_rows, k_cols)
+  }
+  
+  if(!is.null(kernel_params$rbf_ind)){
+    kern_rbf = rbfdot(sigma = kernel_params$sigma)
+    K_rbf = kernelMatrix(kern_lin, matrix(X[, kernel_params$rbf_ind]), matrix(Y[, kernel_params$rbf_ind]))
+  }else{
+    K_rbf = matrix(0, k_rows, k_cols)
+  }
+  
+  if(!is.null(kernel_params$matern_ind)){
+    K_matern = matern.cov(matrix(X[, kernel_params$matern_ind])
+                          , matrix(Y[, kernel_params$matern_ind])
+                   , theta = kernel_params$theta
+                   , smoothness = kernel_params$smoothness
+                   , scale = kernel_params$scale
+                   )
+  }else{
+    K_matern = matrix(0, k_rows, k_cols)
+  }
+  
+  K_full = K_lin + K_rbf + K_matern
+  
+  # this takes a while ugh
+  K_new = nearPD(K_full)$mat
+  
+  return(K_new)
+}
+
+
+
 doKMM = function(X_trn, X_tst
                  , B = 1
-                 , kernel_type = 'linear'
-                 , sigma = 1  #rbf params
-                 , theta = 1.0, smoothness = 0.5, scale=1 #matern params
+                 , kernel_params
                  ){
   require(Matrix)
   require(kernlab)
@@ -725,30 +771,13 @@ doKMM = function(X_trn, X_tst
     n_tst = nrow(X_tst)
   }
   
-  
   eps = B/sqrt(n_trn)  # set epsilon based on B and suggested value from Gretton chapter; this constraint ensures that  Beta * the training dist is close to a probability dist
   
-  if(kernel_type == 'linear'){
-    kern = vanilladot()
-    K = kernelMatrix(kern, x = X_trn)
-  }else if(kernel_type == 'rbf'){
-    kern = rbfdot(sigma = sigma)
-    K = kernelMatrix(kern, x = X_trn)
-  }else if(kernel_type == 'matern'){
-    K = matern.cov(X_trn, theta = theta, smoothness = smoothness, scale = scale)
-  }else{
-    stop("Kernel type not supported")
-  }
-  
+  K = getCustomKern(X_trn, kernel_params)
   # fix to make sure we can use Cholesky decomp
   newK = nearPD(K)$mat
   
-  if(kernel_type == 'matern'){
-    kappa = matern.cov(X_trn, X_tst, theta = theta, smoothness = smoothness, scale = scale)
-  }else{
-    kappa = kernelMatrix(kern, x = X_trn, y = X_tst)
-  }
-  
+  kappa = getCustomKern(X_trn, X_tst, kernel_params)
   kappa = (n_trn/n_tst) * rowSums(kappa)
   
   G = as.matrix(rbind(- rep(1, n_trn)
