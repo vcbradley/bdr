@@ -80,7 +80,7 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
 getFeatures = function(data, bag, train_ind, landmarks, kernel_params){
   
   # calculate features for train
-  phi_x = getCustomKern(X = as.matrix(data), Y = landmarks, kernel_params = kernel_params)
+  phi_x = getCustomKern(X = data, Y = landmarks, kernel_params = kernel_params)
   phi_x = data.table(bag = bag, phi_x)
   setnames(phi_x, c('bag', paste0('u', 1:nrow(landmarks))))
   
@@ -151,7 +151,8 @@ doBasicDR = function(data
                      , score_bags_vars
                      , regression_vars
                      , outcome
-                     , kernel_params
+                     , kernel_type = 'rbf'
+                     , sigma = NULL
                      , n_bags = NULL
                      , n_landmarks = NULL
                      , family = 'gaussian'
@@ -197,9 +198,8 @@ doBasicDR = function(data
                              , subset_ind = (data[, get(train_ind)] == 1))
   }
   
-  # Make matricies for feature embedding
-  X_file = landmarks$X[data[, get(train_ind)] == 1, ]
-  X_file_holdout = landmarks$X[data[, get(test_ind)] == 1, ]
+  # make kernel parameters
+  kernel_params = getKernParams(X = landmarks$X, kernel_type = kernel_type, sigma = sigma)
   
   # get features
   cat(paste0(Sys.time(), "\t Making features\n"))
