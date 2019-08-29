@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(data.table)
 library(R.utils)
+library(knitr)
 library(plotROC)
 
 sourceDirectory('~/github/bdr/utils/')
@@ -18,8 +19,8 @@ plot_dir = '~/github/bdr/pew-experiment/plots/'
 
 # Load results and data
 ```{r}
-load('~/github/bdr/pew-experiment/results/results_20180828.RData')
-
+load('~/github/bdr/pew-experiment/results/results_partyonfile.RData')
+names(results)
 outcome = gsub('_hat', '', names(results[[1]]))
 ```
 
@@ -29,7 +30,6 @@ plot_data = rbindlist(lapply(names(results), function(r_lab){
   cbind(model = r_lab, results[[r_lab]], pew_data[, .(support, holdout)])
 }))
 setnames(plot_data, c('model', 'P(Dem)', 'P(Rep)', 'P(Other)', 'actual', 'holdout'))
-plot_data
 plot_data_melted = melt(plot_data, id.vars = c('model', 'actual', 'holdout'))
 #cbind(plot_data_melted, actual = rep(pew_data[, support], length(unique(plot_data_melted$model)) * 3))
 ```
@@ -103,9 +103,9 @@ lapply(models, function(m){
 ```
 
 ```{r}
-all_tabs[, c('level', 'y_dem', paste0('y_hat_', models, '_dem')), with = F]
-all_tabs[, c('level', paste0('error_', models, '_dem')), with = F]
-all_tabs[, c('level', paste0('error_', models, '_dem_2way')), with = F]
+kable(all_tabs[, c('level', 'y_dem', paste0('y_hat_', models, '_dem')), with = F])
+kable(all_tabs[, c('level', paste0('error_', models, '_dem')), with = F])
+kable(all_tabs[, c('level', paste0('error_', models, '_dem_2way')), with = F])
 ```
 
 
