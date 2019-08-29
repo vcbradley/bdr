@@ -3,4 +3,4 @@
 
 data/fl.2010*
 data/va.2010*
-pew-experiment/results/*
+pew-experiment/results/*.RData
