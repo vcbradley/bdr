@@ -97,6 +97,7 @@ getFeatures = function(data, bag, train_ind, landmarks, kernel_params, weight = 
 
 
 fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian', alpha = 1){
+  require(glmnet)
   
   # fit once to get non-zero coefs
   # cat(dim(mu_hat))
