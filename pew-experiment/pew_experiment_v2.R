@@ -6,6 +6,7 @@ library(ggplot2)
 library(Rfast)
 library(kernlab)
 library(R.utils)
+library(glmnet)
 
 setwd('~/github/bdr')
 x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
@@ -13,14 +14,14 @@ x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
 # read in *recoded* data
 pew_data = fread('data/data_recoded.csv')
 
-run_settings = list(party = 'onfile'
+run_settings = list(party = 'onfile'   #'onfile' or 'insurvey'
                     , n_surveyed = 2000
                     , match_rate = 0.5
                     , n_bags = 75
-                    , n_landmarks = 200)
+                    , n_landmarks = 100)
 
 results_id = paste0('party',run_settings$party
-                    , '_match', run_settings$match_rate
+                    , '_match', round(run_settings$match_rate*100)
                     , '_bags', run_settings$n_bags
                     , '_lmks', run_settings$n_landmarks)
 
@@ -29,14 +30,15 @@ results_id = paste0('party',run_settings$party
 vars = list()
 vars$all = names(pew_data)[grepl('demo|^age_scaled', names(pew_data))]
 vars$survey = c('demo_mode', 'demo_education', 'demo_phonetype', 'demo_ideology')#, 'demo_party')
-vars$file_and_survey = c('demo_sex', 'demo_age_bucket', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
-vars$all = vars$all[-which(grepl('demo_state|month_called', vars$all))]
-vars$file_only = vars$all[!vars$all %in% c(vars$survey, vars$file_and_survey)]
-
 # add party to survey variables
 if(run_settings$party == 'insurvey'){
   vars$survey = c(vars$survey, 'demo_party')
 }
+vars$file_and_survey = c('demo_sex', 'demo_age_bucket', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
+vars$all = vars$all[-which(grepl('demo_state|month_called', vars$all))]
+vars$file_only = vars$all[!vars$all %in% c(vars$survey, vars$file_and_survey)]
+
+
 
 
 
@@ -110,32 +112,11 @@ rbindlist(lapply(c(vars$file_and_survey), function(v){
 ###################################
 ############ FIT MODELS ###########
 ###################################
+results = list()
 
-
-## Basic LASSO
-lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
-X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
-
-lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
-                     , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
-                     , phi_x = X_lasso
-                     , family = 'multinomial'
-)
-
-pew_data[, paste0(dist_reg_params$outcome, '_logit') := 
-           as.list(data.table(matrix(lasso_fit$Y_hat, ncol= 3)))]
-
-results[['logit']] = pew_data[, paste0(dist_reg_params$outcome, '_logit'), with = F]
-
-
-#------------------------------------------------------------------------
-### DIST REG MODELS
 regression_vars = c(vars$file_and_survey, vars$file_only)
 n_landmarks = run_settings$n_landmarks
 n_bags = run_settings$n_bags
-
-
-results = list()
 
 ## fix landmarks
 landmarks = getLandmarks(data = pew_data
@@ -159,9 +140,6 @@ bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew
 
 
 
-
-
-#------------------------------------------------------------------------
 #### SET PARAMETERS ####
 dist_reg_params = list(sigma = 0.16 #from quick CV
                        , bags = bags
@@ -177,6 +155,29 @@ dist_reg_params = list(sigma = 0.16 #from quick CV
                        , bagging_ind = 'surveyed'
                        , kernel_type = 'rbf'
                        , weight_col = NULL)
+
+
+## Basic LASSO
+lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
+X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
+
+lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
+                     , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                     , phi_x = X_lasso
+                     , family = 'multinomial'
+)
+
+pew_data[, paste0(dist_reg_params$outcome, '_logit') := 
+           as.list(data.table(matrix(lasso_fit$Y_hat, ncol= 3)))]
+
+calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, with = F]))
+        , as.numeric(unlist(pew_data[holdout == 1, paste0(dist_reg_params$outcome, '_logit'), with = F])))
+
+results[['logit']] = pew_data[, paste0(dist_reg_params$outcome, '_logit'), with = F]
+
+
+#------------------------------------------------------------------------
+### DIST REG MODELS
 
 
 # # quick CV
@@ -300,6 +301,7 @@ results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
 #------------------------------------------------------------------------
 ###### calculate group means - re-run after running DR because bags will be re-fit
 
+pew_data[, bag := bags$bags_newdata]
 Y_grp_means = pew_data[surveyed == 1, lapply(.SD, mean), .SDcols = dist_reg_params$outcome, by = bag]
 setnames(Y_grp_means, c('bag',paste0(dist_reg_params$outcome, '_grpmean')))
 
@@ -317,3 +319,8 @@ results[['grpmean']] = Y_grp_means[, -1]
 ## Write out results
 save(results, vars, pew_data, run_settings
      , file = paste0('~/github/bdr/pew-experiment/results/results_',results_id,'.RData'))
+
+
+rmarkdown::render(input = '~/github/bdr/pew-experiment/results/results_analysis.Rmd',
+                  output_file = paste0('results_analysis_', results_id, '.html')
+                  )
