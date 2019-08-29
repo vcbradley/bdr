@@ -13,6 +13,17 @@ x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
 # read in *recoded* data
 pew_data = fread('data/data_recoded.csv')
 
+run_settings = list(party = 'onfile'
+                    , n_surveyed = 2000
+                    , match_rate = 0.5
+                    , n_bags = 75
+                    , n_landmarks = 200)
+
+results_id = paste0('party',run_settings$party
+                    , '_match', run_settings$match_rate
+                    , '_bags', run_settings$n_bags
+                    , '_lmks', run_settings$n_landmarks)
+
 
 #categorize variables
 vars = list()
@@ -22,12 +33,18 @@ vars$file_and_survey = c('demo_sex', 'demo_age_bucket', 'demo_income', 'demo_reg
 vars$all = vars$all[-which(grepl('demo_state|month_called', vars$all))]
 vars$file_only = vars$all[!vars$all %in% c(vars$survey, vars$file_and_survey)]
 
+# add party to survey variables
+if(run_settings$party == 'insurvey'){
+  vars$survey = c(vars$survey, 'demo_party')
+}
+
+
 
 ## get test train sets
 testtrain = getTestTrain(data = pew_data
                          , n_holdout = 1000
-                         , n_surveyed = 2000
-                         , n_matched = 1000
+                         , n_surveyed = run_settings$n_surveyed
+                         , n_matched = run_settings$n_surveyed * run_settings$match_rate
                          , p_surveyed = pew_data$p_surveyed
                          , p_matched = pew_data$p_matched
 )
@@ -41,6 +58,8 @@ pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 ######### WEIGHT DATA ##########
 ################################
 
+# marginals won't match with RBF kernel, but weights are too extreme with linear
+
 #B = 5.0  # upper bound; B = 1 is the unweighted solution
 
 pew_data[, kmm_weight := 1]
@@ -50,7 +69,7 @@ w_matched = getWeights(data = pew_data
                        , vars = c(vars$file_and_survey, vars$file_only)
                        , train_ind = 'matched'
                        , target_ind = 'voterfile'
-                       , kernel_type = 'rbf_age' # marginals won't match with RBF kernel, but weights are too extreme with linear
+                       , kernel_type = 'rbf_age' 
                        , sigma = 0.1
                        , B = c(0.1, 5))
 hist(w_matched)
@@ -84,14 +103,38 @@ rbindlist(lapply(c(vars$file_and_survey), function(v){
 }))[order(v, get)]
 
 
+
+
+
 #------------------------------------------------------------------------
 ###################################
 ############ FIT MODELS ###########
 ###################################
 
+
+## Basic LASSO
+lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
+X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
+
+lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
+                     , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                     , phi_x = X_lasso
+                     , family = 'multinomial'
+)
+
+pew_data[, paste0(dist_reg_params$outcome, '_logit') := 
+           as.list(data.table(matrix(lasso_fit$Y_hat, ncol= 3)))]
+
+results[['logit']] = pew_data[, paste0(dist_reg_params$outcome, '_logit'), with = F]
+
+
+#------------------------------------------------------------------------
+### DIST REG MODELS
 regression_vars = c(vars$file_and_survey, vars$file_only)
-n_landmarks = 200
-n_bags = 75
+n_landmarks = run_settings$n_landmarks
+n_bags = run_settings$n_bags
+
+
 results = list()
 
 ## fix landmarks
@@ -115,110 +158,150 @@ bags_unm = bags
 bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew_data$matched))
 
 
-### fit DR -- WEIGHTED
-outcome = c('y_dem', 'y_rep', 'y_oth')
-fit_wdr = doBasicDR(data = pew_data
-                    , make_bags_vars = vars$file_and_survey
-                    , score_bags_vars = vars$file_and_survey
-                    , regression_vars = regression_vars
-                    , outcome = outcome
-                    , n_bags = n_bags
-                    , kernel_type = 'rbf'
-                    , sigma = 0.01
-                    , family = 'multinomial'
-                    , bagging_ind = 'surveyed'
-                    , train_ind = 'voterfile'
-                    , test_ind = 'holdout'
-                    , weight_col = 'kmm_weight'
-                    , landmarks = landmarks
-                    , bags = bags
-)
-fit_wdr$mse_test
-results[['wdr']] = fit_wdr$y_hat
+
+
+
+#------------------------------------------------------------------------
+#### SET PARAMETERS ####
+dist_reg_params = list(sigma = 0.16 #from quick CV
+                       , bags = bags
+                       , landmarks = landmarks
+                       , make_bags_vars = vars$file_and_survey
+                       , score_bags_vars = vars$file_and_survey
+                       , regression_vars = regression_vars
+                       , outcome = c('y_dem', 'y_rep', 'y_oth')
+                       , n_bags = n_bags
+                       , outcome_family = 'multinomial'
+                       , train_ind = 'voterfile'
+                       , test_ind = 'holdout'
+                       , bagging_ind = 'surveyed'
+                       , kernel_type = 'rbf'
+                       , weight_col = NULL)
+
+
+# # quick CV
+# sigmas = exp(seq(log(0.000001), log(0.01), length.out = 10))
+# #sigmas = seq(0.01, 0.2, length.out = 20)
+# dist_reg_params$kernel_type = 'rbf'
+# dist_reg_params$bags = bags_unm
+# 
+# cust_mse = unlist(lapply(sigmas, function(s){
+#   dist_reg_params$sigma = s
+#   try(doBasicDR(data = pew_data, dist_reg_params)$mse_test)
+# }))
+# 
+# plot(x = sigmas[1:length(cust_mse)], y = cust_mse)
+# sigmas[which.min(cust_mse)]
+
 
 ### fit DR -- Linear
-fit_dr_linear = doBasicDR(data = pew_data
-                          , make_bags_vars = vars$file_and_survey
-                          , score_bags_vars = vars$file_and_survey
-                          , regression_vars = regression_vars
-                          , outcome = outcome
-                          , n_bags = n_bags
-                          #, n_landmarks = 300
-                          #, sigma = 0.01
-                          , family = 'multinomial'
-                          , bagging_ind = 'surveyed'
-                          , train_ind = 'voterfile'
-                          , test_ind = 'holdout'
-                          , kernel_type = 'linear'
-                          , landmarks = landmarks)
+dist_reg_params$kernel_type = 'linear'
+dist_reg_params$weight_col = NULL
+dist_reg_params$bags = bags
+
+fit_dr_linear = doBasicDR(data = pew_data, dist_reg_params)
 fit_dr_linear$mse_test
 results[['dr_linear']] = fit_dr_linear$y_hat
 
+
+
 ### fit DR -- weighted & Linear
-fit_wdr_linear = doBasicDR(data = pew_data
-                           , make_bags_vars = vars$file_and_survey
-                           , score_bags_vars = vars$file_and_survey
-                           , regression_vars = regression_vars
-                           , outcome = outcome
-                           #, n_bags = n_bags
-                           #, n_landmarks = 300
-                           #, sigma = 0.01
-                           , family = 'multinomial'
-                           , bagging_ind = 'surveyed'
-                           , train_ind = 'voterfile'
-                           , test_ind = 'holdout'
-                           , kernel_type = 'linear'
-                           , weight_col = 'kmm_weight'
-                           , landmarks = landmarks
-                           , bags = bags)
+dist_reg_params$kernel_type = 'linear'
+dist_reg_params$weight_col = 'kmm_weight'
+dist_reg_params$bags = bags
+
+fit_wdr_linear = doBasicDR(data = pew_data, dist_reg_params)
 fit_wdr_linear$mse_test
 results[['wdr_linear']] = fit_wdr_linear$y_hat
 
 
+
 ### fit DR - NO WEIGHTING
-fit_dr = doBasicDR(data = pew_data
-                   , make_bags_vars = vars$file_and_survey
-                   , score_bags_vars = vars$file_and_survey
-                   , regression_vars = regression_vars
-                   , outcome = outcome
-                   , n_bags = n_bags
-                   #, n_landmarks = 300
-                   , sigma = 0.01
-                   , family = 'multinomial'
-                   , bagging_ind = 'surveyed'
-                   , train_ind = 'voterfile'
-                   , test_ind = 'holdout'
-                   , landmarks = landmarks
-                   , bags = bags
-)
+dist_reg_params$kernel_type = 'rbf'
+dist_reg_params$weight_col = NULL
+dist_reg_params$bags = bags
+dist_reg_params$sigma = 0.16
+
+fit_dr = doBasicDR(data = pew_data, dist_reg_params)
 fit_dr$mse_test
 results[['dr']] = fit_dr$y_hat
 
 
-### fit DR - matched own bags
-fit_dr_sepbags = doBasicDR(data = pew_data
-                           , make_bags_vars = vars$file_and_survey
-                           , score_bags_vars = vars$file_and_survey
-                           , regression_vars = regression_vars
-                           , outcome = outcome
-                           , n_bags = n_bags
-                           #, n_landmarks = 300
-                           , sigma = 0.01
-                           , family = 'multinomial'
-                           , bagging_ind = 'surveyed'
-                           , train_ind = 'voterfile'
-                           , test_ind = 'holdout'
-                           , landmarks = landmarks
-                           , bags = bags_unm
-)
+
+### fit DR -- WEIGHTED
+dist_reg_params$kernel_type = 'rbf'
+dist_reg_params$weight_col = 'kmm_weight'
+dist_reg_params$bags = bags
+dist_reg_params$sigma = 0.16
+
+fit_wdr = doBasicDR(data = pew_data, dist_reg_params)
+fit_wdr$mse_test
+results[['wdr']] = fit_wdr$y_hat
+
+
+
+### fit DR - SEP BAGS
+dist_reg_params$kernel_type = 'rbf'
+dist_reg_params$weight_col = NULL
+dist_reg_params$bags = bags_unm
+dist_reg_params$sigma = 0.003
+
+fit_dr_sepbags = doBasicDR(data = pew_data, dist_reg_params)
 fit_dr_sepbags$mse_test
 results[['dr_sepbags']] = fit_dr_sepbags$y_hat
+
+
+
+### fit DR - SEP BAGS - WEIGHTED
+dist_reg_params$kernel_type = 'rbf'
+dist_reg_params$weight_col = 'kmm_weight'
+dist_reg_params$bags = bags_unm
+dist_reg_params$sigma = 0.003
+
+fit_wdr_sepbags = doBasicDR(data = pew_data, dist_reg_params)
+fit_wdr_sepbags$mse_test
+results[['wdr_sepbags']] = fit_wdr_sepbags$y_hat
+
+
+
+### fit DR - SEP BAGS - LINEAR
+dist_reg_params$kernel_type = 'linear'
+dist_reg_params$weight_col = NULL
+dist_reg_params$bags = bags_unm
+
+fit_dr_sepbags_lin = doBasicDR(data = pew_data, dist_reg_params)
+fit_dr_sepbags_lin$mse_test
+results[['dr_sepbags_lin']] = fit_dr_sepbags_lin$y_hat
+
+
+### fit DR - SEP BAGS - CUSTOM KERNEL
+dist_reg_params$kernel_type = 'rbf_age'
+dist_reg_params$sigma = 2.6
+dist_reg_params$weight_col = NULL
+dist_reg_params$bags = bags_unm
+
+fit_dr_sepbags_cust = doBasicDR(data = pew_data, dist_reg_params)
+fit_dr_sepbags_cust$mse_test
+results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
+
+# # quick CV
+# 
+# #sigmas = exp(seq(log(0.005), log(5), length.out = 20))
+# sigmas = seq(2,3, length.out = 10)
+# 
+# cust_mse = unlist(lapply(sigmas, function(s){
+#   dist_reg_params$sigma = s
+#   try(doBasicDR(data = pew_data, dist_reg_params)$mse_test)
+# }))
+# 
+# plot(x = sigmas, y = cust_mse)
+
 
 #------------------------------------------------------------------------
 ###### calculate group means - re-run after running DR because bags will be re-fit
 
-Y_grp_means = fit_wdr$data[surveyed == 1, lapply(.SD, mean), .SDcols = outcome, by = bag]
-setnames(Y_grp_means, c('bag',paste0(outcome, '_grpmean')))
+Y_grp_means = pew_data[surveyed == 1, lapply(.SD, mean), .SDcols = dist_reg_params$outcome, by = bag]
+setnames(Y_grp_means, c('bag',paste0(dist_reg_params$outcome, '_grpmean')))
 
 Y_grp_means = merge(pew_data[, .(bag)], Y_grp_means, by = 'bag', all.x = T)
 
@@ -231,22 +314,6 @@ results[['grpmean']] = Y_grp_means[, -1]
 
 
 #------------------------------------------------------------------------
-## Basic LASSO
-lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
-X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
-
-lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
-                     , Y_bag = as.matrix(pew_data[matched == 1, .(y_dem, y_rep, y_oth)])
-                     , phi_x = X_lasso
-                     , family = 'multinomial'
-)
-
-pew_data[, c('y_dem_logit', 'y_rep_logit', 'y_oth_logit') := 
-           as.list(data.table(matrix(lasso_fit$Y_hat, ncol= 3)))]
-
-results[['logit']] = pew_data[, c('y_dem_logit', 'y_rep_logit', 'y_oth_logit'), with = F]
-
-
-#------------------------------------------------------------------------
 ## Write out results
-save(results, vars, pew_data, file = 'pew-experiment/results/results_partyonfile.RData')
+save(results, vars, pew_data, run_settings
+     , file = paste0('~/github/bdr/pew-experiment/results/results_',results_id,'.RData'))
