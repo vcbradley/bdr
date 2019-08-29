@@ -77,17 +77,21 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
 
 
 
-getFeatures = function(data, bag, train_ind, landmarks, kernel_params){
+getFeatures = function(data, bag, train_ind, landmarks, kernel_params, weight = NULL){
   
   # calculate features for train
   phi_x = getCustomKern(X = data, Y = landmarks, kernel_params = kernel_params)
-  phi_x = data.table(bag = bag, phi_x)
-  setnames(phi_x, c('bag', paste0('u', 1:nrow(landmarks))))
+  phi_x = data.table(bag = bag, phi_x, weight)
+  setnames(phi_x, c('bag', paste0('u', 1:nrow(landmarks)), 'weight'))
   
   # calculate means of embeddings
-  mu_hat_train = phi_x[train_ind == 1, lapply(.SD, mean), .SDcols = names(phi_x)[-1], by = 'bag'][order(bag)]
+  if(!is.null(weight)){
+    mu_hat_train = phi_x[train_ind == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = names(phi_x)[-c(1, ncol(phi_x))], by = bag][order(bag)]
+  }else{
+    mu_hat_train = phi_x[train_ind == 1, lapply(.SD, mean), .SDcols = names(phi_x)[-c(1, ncol(phi_x))], by = 'bag'][order(bag)]
+  }
   
-  return(list(mu_hat = mu_hat_train, phi_x = phi_x))
+  return(list(mu_hat = mu_hat_train, phi_x = phi_x[, -which(names(phi_x) == 'weight'), with = F]))
 }
 
 
@@ -122,15 +126,7 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
   if(length(nonzero_ind) == 0){
     nonzero_ind = 1:ncol(mu_hat_mat)
   }
-  
-  
-  # cat(dim(mu_hat))
-  # cat('\n')
-  # cat(dim(mu_hat_mat))
-  # 
-  #  cat(nonzero_ind)
-  #  cat('\n')
-  
+
   # refit to avoid shrinkage
   fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family, alpha = alpha)
   
@@ -145,44 +141,48 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
 }
 
 
+# , make_bags_vars
+# , score_bags_vars = NULL
+# , regression_vars
+# , outcome
+# , kernel_type = 'rbf'
+# , sigma = NULL
+# , n_bags = NULL
+# , n_landmarks = NULL
+# , family = 'gaussian'
+# , bagging_ind = 'surveyed'
+# , train_ind = 'voterfile'
+# , test_ind = 'holdout'
+# , weight_col = NULL
+# , landmarks = NULL
+# , bags = NULL
 
-doBasicDR = function(data
-                     , make_bags_vars
-                     , score_bags_vars
-                     , regression_vars
-                     , outcome
-                     , kernel_type = 'rbf'
-                     , sigma = NULL
-                     , n_bags = NULL
-                     , n_landmarks = NULL
-                     , family = 'gaussian'
-                     , bagging_ind = 'surveyed'
-                     , train_ind = 'voterfile'
-                     , test_ind = 'holdout'
-                     , weight_col = NULL
-                     , landmarks = NULL
-                     , bags = NULL
-){
+doBasicDR = function(data, params){
   
   require(glmnet)
   require(kernlab)
   
-  if(is.null(weight_col)){
+  if(is.null(params$weight_col)){
     data[, weight := 1]
   }else{
-    data[, weight := get(weight_col)]
+    data[, weight := get(params$weight_col)]
+  }
+  
+  if(is.null(params$score_bags_vars)){
+    params$score_bags_vars = params$make_bags_vars
   }
   
   data[, bag := NULL]
   
   # Make bags
-  if(is.null(bags)){
+  if(is.null(params$bags)){
     cat(paste0(Sys.time(), "\t Making bags\n"))
-    bags = getBags(data = data[get(bagging_ind) == 1,]
-                   , vars = make_bags_vars
-                   , n_bags = n_bags
-                   , newdata = data[, score_bags_vars, with = F])
+    bags = getBags(data = data[get(params$bagging_ind) == 1,]
+                   , vars = params$make_bags_vars
+                   , n_bags = params$n_bags
+                   , newdata = data[, params$score_bags_vars, with = F])
   }else{
+    bags = params$bags
     n_bags = length(unique(bags$bags_newdata))
   }
   
@@ -190,34 +190,38 @@ doBasicDR = function(data
   data[, bag := bags$bags_newdata]
   
   # Get landmarks
-  if(is.null(landmarks)){
+  if(is.null(params$landmarks)){
     cat(paste0(Sys.time(), "\t Getting landmarks\n"))
     landmarks = getLandmarks(data = data
-                             , vars = regression_vars
-                             , n_landmarks = n_landmarks
-                             , subset_ind = (data[, get(train_ind)] == 1))
+                             , vars = params$regression_vars
+                             , n_landmarks = params$n_landmarks
+                             , subset_ind = (data[, get(params$train_ind)] == 1))
+  }else{
+    landmarks = params$landmarks
   }
   
   # make kernel parameters
-  kernel_params = getKernParams(X = landmarks$X, kernel_type = kernel_type, sigma = sigma)
+  kernel_params = getKernParams(X = landmarks$X, kernel_type = params$kernel_type, sigma = params$sigma)
+  print(kernel_params)
   
   # get features
   cat(paste0(Sys.time(), "\t Making features\n"))
   features = getFeatures(data = landmarks$X
                          , bag = as.numeric(data[, bag])
-                         , train_ind = as.numeric(data[, get(train_ind)])
+                         , train_ind = as.numeric(data[, get(params$train_ind)])
                          , landmarks = landmarks$landmarks
-                         , kernel_params = kernel_params)
+                         , kernel_params = kernel_params
+                         , weight = as.numeric(data[, weight]))
   
   
   # prep outcome
   # if weighting col is specified, then use that to get weighted mean
-  if(family == 'multinomial'){
+  if(params$outcome_family == 'multinomial'){
     #Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = outcome, by = bag][order(bag)]
-    Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = outcome, by = bag][order(bag)]
+    Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = params$outcome, by = bag][order(bag)]
   }else{
     #Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = weigted.mean(get(outcome), w = weight)), bag][order(bag)]
-    Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = sum(weight)), bag][order(bag)]
+    Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = sum(weight)), bag][order(bag)]
   }
   # weights might be negative and prodce negative estimates of Y, so floor at 0
   Y_svy_bag[Y_svy_bag < 0] <- 0
@@ -235,7 +239,7 @@ doBasicDR = function(data
     Y_svy_bag = Y_svy_bag[-which(!Y_svy_bag$bag %in% features$mu_hat$bag), ]
   }
   
-  if(family == 'multinomial'){
+  if(params$outcome_family == 'multinomial'){
     Y_bag = as.matrix(Y_svy_bag[,-1, with = F])
   }else{
     Y_bag = Y_svy_bag$y_mean
@@ -247,7 +251,7 @@ doBasicDR = function(data
   fit = fitLasso(mu_hat = features$mu_hat
                  , Y_bag = Y_bag
                  , phi_x = features$phi_x[, -1]
-                 , family = family
+                 , family = params$outcome_family
                  )
   
   # score the file
@@ -256,8 +260,8 @@ doBasicDR = function(data
   #data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
   
   # calculate mse
-  mse_test = calcMSE(Y = as.numeric(unlist(data[get(test_ind) == 1, which(names(data) %in% outcome), with = F]))
-                     , Y_pred = as.numeric(unlist(y_hat[which(data[,get(test_ind) == 1])])))
+  mse_test = calcMSE(Y = as.numeric(unlist(data[get(params$test_ind) == 1, which(names(data) %in% params$outcome), with = F]))
+                     , Y_pred = as.numeric(unlist(y_hat[which(data[,get(params$test_ind) == 1])])))
   
   return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = y_hat, mse_test = mse_test))
 }
