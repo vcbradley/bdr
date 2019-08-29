@@ -14,7 +14,8 @@ getKernParams = function(X, kernel_type, sigma = NULL){
   }else if(kernel_type == 'rbf'){
     kernel_params[['rbf_ind']] = 1:ncol(X)
   }else if(kernel_type == 'rbf_age'){
-    kernel_params[['lin_ind']] = which(!colnames(X) == 'age_scaled')
+    #kernel_params[['lin_ind']] = which(!colnames(X) == 'age_scaled')
+    kernel_params[['linear_ind']] = 1:ncol(X)
     kernel_params[['rbf_ind']] = which(colnames(X) == 'age_scaled')
   }else{
     stop("Kernel type not supported")
@@ -35,7 +36,6 @@ getCustomKern = function(X, Y = NULL, kernel_params){
   
   k_rows = nrow(X)
   k_cols = nrow(Y)
-  print(paste(k_rows, k_cols))
   
   if(!is.null(kernel_params$linear_ind)){
     kern_lin = vanilladot()
