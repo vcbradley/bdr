@@ -63,7 +63,7 @@ getWeights = function(data, vars, train_ind, target_ind
   
   
   ## SET KERNEL
-  kernel_params = getKernParams(X = X_train, sigma = sigma)
+  kernel_params = getKernParams(X = X_train, sigma = sigma, kernel_type = kernel_type)
   
   # GET WEIGHTS
   weighted = doKMM(X_trn = X_train
