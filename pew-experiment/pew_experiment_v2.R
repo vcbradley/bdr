@@ -18,12 +18,14 @@ run_settings = list(party = 'onfile'   #'onfile' or 'insurvey'
                     , n_surveyed = 2000
                     , match_rate = 0.5
                     , n_bags = 75
-                    , n_landmarks = 100)
+                    , n_landmarks = 200
+                    , refit_bags = T)
 
 results_id = paste0('party',run_settings$party
                     , '_match', round(run_settings$match_rate*100)
                     , '_bags', run_settings$n_bags
-                    , '_lmks', run_settings$n_landmarks)
+                    , '_lmks', run_settings$n_landmarks
+                    , '_refitbags', run_settings$refit_bags)
 
 
 #categorize variables
@@ -131,11 +133,14 @@ bags = getBags(data = pew_data[surveyed == 1,]
                , newdata = pew_data[, vars$file_and_survey, with = F])
 
 # give each matched data point its own bag
-# bags_unm = getBags(data = pew_data[unmatched == 1,]
-#                , vars = vars$file_and_survey
-#                , n_bags = n_bags
-#                , newdata = pew_data[, vars$file_and_survey, with = F])
-bags_unm = bags
+if(run_settings$refit_bags){
+  bags_unm = getBags(data = pew_data[unmatched == 1,]
+                     , vars = vars$file_and_survey
+                     , n_bags = n_bags
+                     , newdata = pew_data[, vars$file_and_survey, with = F])
+}else{
+  bags_unm = bags
+}
 bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew_data$matched))
 
 
@@ -161,20 +166,26 @@ dist_reg_params = list(sigma = 0.16 #from quick CV
 lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
 X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
 
-lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
-                     , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
-                     , phi_x = X_lasso
-                     , family = 'multinomial'
-)
-
-pew_data[, paste0(dist_reg_params$outcome, '_logit') := 
-           as.list(data.table(matrix(lasso_fit$Y_hat, ncol= 3)))]
+# lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
+#                      , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+#                      , phi_x = X_lasso
+#                      , family = 'multinomial'
+# )
+lasso_fit = cv.glmnet(x = X_lasso[which(pew_data$matched == 1), ]
+                   , y = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                   , family = 'multinomial')
+lasso_fit$Y_hat = data.table(data.frame(predict(lasso_fit, newx = X_lasso, type = 'response')))
+setnames(lasso_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
 
 calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, with = F]))
-        , as.numeric(unlist(pew_data[holdout == 1, paste0(dist_reg_params$outcome, '_logit'), with = F])))
+        , as.numeric(unlist(lasso_fit$Y_hat[pew_data$holdout == 1,])))
 
-results[['logit']] = pew_data[, paste0(dist_reg_params$outcome, '_logit'), with = F]
+results[['logit']] = lasso_fit$Y_hat
 
+ggplot(lasso_fit$Y_hat) + geom_density(aes(x = y_dem.1), color = 'blue') +
+  geom_density(aes(x = y_rep.1), color = 'red') +
+  geom_density(aes(x = y_oth.1), color = 'green') +
+  facet_grid(~pew_data$support)
 
 #------------------------------------------------------------------------
 ### DIST REG MODELS
@@ -257,7 +268,7 @@ results[['dr_sepbags']] = fit_dr_sepbags$y_hat
 dist_reg_params$kernel_type = 'rbf'
 dist_reg_params$weight_col = 'kmm_weight'
 dist_reg_params$bags = bags_unm
-dist_reg_params$sigma = 0.003
+dist_reg_params$sigma = 0.0035
 
 fit_wdr_sepbags = doBasicDR(data = pew_data, dist_reg_params)
 fit_wdr_sepbags$mse_test
