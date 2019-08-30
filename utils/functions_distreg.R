@@ -119,20 +119,23 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
     nonzero_ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)  # drop intercept term
   }else{
     nonzero_ind = sort(unique(unlist(lapply(coef(fit_lambda, s = 'lambda.min'), function(c){
-      which(c[-1] != 0)
+      which(c[-c(1:(ncol(Y_bag) - 1))] != 0) #n-1 intercepts, where n is number of outcome categories
     }))))
   }
+  # always include the intercept
+  nonzero_ind = c(1, nonzero_ind + 1)
   
   # use all vars again if we didn't find any sig ones the first time
   if(length(nonzero_ind) == 0){
     nonzero_ind = 1:ncol(mu_hat_mat)
   }
 
-  # refit to avoid shrinkage
-  fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family, alpha = alpha)
+  # refit to avoid shrinkage - this led to much higher MSEs in holdout set! So switcheing back to cv.glmnet
+  #fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family, alpha = alpha)
+  fit = cv.glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, family = family, alpha = alpha)
   
   if(!is.null(phi_x)){
-    Y_hat = predict(fit, newx = as.matrix(phi_x)[, nonzero_ind], type = 'response')
+    Y_hat = data.table(data.frame(predict(fit, newx = as.matrix(phi_x)[, nonzero_ind], type = 'response')))
   }else{
     Y_hat = NULL
   }
@@ -218,11 +221,11 @@ doBasicDR = function(data, params){
   # prep outcome
   # if weighting col is specified, then use that to get weighted mean
   if(params$outcome_family == 'multinomial'){
-    #Y_svy_bag = data[get(bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = outcome, by = bag][order(bag)]
-    Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = params$outcome, by = bag][order(bag)]
+    Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = params$outcome, by = bag][order(bag)]
+    #Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = params$outcome, by = bag][order(bag)]
   }else{
-    #Y_svy_bag = data[get(bagging_ind) == 1, .(y_mean = weigted.mean(get(outcome), w = weight)), bag][order(bag)]
-    Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = sum(weight)), bag][order(bag)]
+    Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = weigted.mean(get(params$outcome), w = weight)), bag][order(bag)]
+    #Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = sum(weight)), bag][order(bag)]
   }
   # weights might be negative and prodce negative estimates of Y, so floor at 0
   Y_svy_bag[Y_svy_bag < 0] <- 0
@@ -256,15 +259,14 @@ doBasicDR = function(data, params){
                  )
   
   # score the file
-  y_hat = data.table(data.frame(fit$Y))
-  setnames(y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+  setnames(fit$Y, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
   #data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
   
   # calculate mse
   mse_test = calcMSE(Y = as.numeric(unlist(data[get(params$test_ind) == 1, which(names(data) %in% params$outcome), with = F]))
-                     , Y_pred = as.numeric(unlist(y_hat[which(data[,get(params$test_ind) == 1])])))
+                     , Y_pred = as.numeric(unlist(fit$Y[which(data[,get(params$test_ind) == 1])])))
   
-  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = y_hat, mse_test = mse_test))
+  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = fit$Y, mse_test = mse_test))
 }
 
 
