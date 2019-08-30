@@ -13,22 +13,21 @@ library(knitr)
 library(plotROC)
 
 sourceDirectory('~/github/bdr/utils/')
-
-plot_dir = '~/github/bdr/pew-experiment/plots/'
 ```
 
 # Load results and data
 ```{r}
-load('~/github/bdr/pew-experiment/results/results_partyonfile.RData')
+run_settings
+load(paste0('~/github/bdr/pew-experiment/results/results_',results_id,'.RData'))
 names(results)
-outcome = gsub('_hat', '', names(results[[1]]))
+outcome = gsub('_hat|_logit', '', names(results[[1]]))
 ```
 
 ```{r}
 ###### PREP plot data
 plot_data = rbindlist(lapply(names(results), function(r_lab){
   cbind(model = r_lab, results[[r_lab]], pew_data[, .(support, holdout)])
-}))
+}), use.names = FALSE)
 setnames(plot_data, c('model', 'P(Dem)', 'P(Rep)', 'P(Other)', 'actual', 'holdout'))
 plot_data_melted = melt(plot_data, id.vars = c('model', 'actual', 'holdout'))
 #cbind(plot_data_melted, actual = rep(pew_data[, support], length(unique(plot_data_melted$model)) * 3))
@@ -102,7 +101,7 @@ lapply(models, function(m){
 
 ```
 
-```{r}
+```{r, results='hide'}
 kable(all_tabs[, c('level', 'y_dem', paste0('y_hat_', models, '_dem')), with = F])
 kable(all_tabs[, c('level', paste0('error_', models, '_dem')), with = F])
 kable(all_tabs[, c('level', paste0('error_', models, '_dem_2way')), with = F])
@@ -138,6 +137,7 @@ data.table(models
 , error_rep = as.numeric(all_tabs[level == '1', paste0('error_', models, '_rep'), with = F])
 , error_oth = as.numeric(all_tabs[level == '1', paste0('error_', models, '_oth'), with = F])
 , error_dem_2way = as.numeric(all_tabs[level == '1', paste0('error_', models, '_dem_2way'), with = F])
+, dem_2way = as.numeric(all_tabs[level == '1', paste0('y_hat_', models, '_dem_2way'), with = F])
 )
 ```
 
@@ -152,7 +152,7 @@ plot_data_melted = plot_data_melted[, .(actual, holdout, value, score_decile = c
 ```
 
 
-```{r}
+```{r score-dists, fig.height=6, fig.width=10}
 ###### PLOT: check distributions of predicted probabilities
 
 plot_pred_probs = ggplot(plot_data_melted, aes(x = value, color = actual)) + geom_density() +
@@ -162,13 +162,12 @@ plot_pred_probs = ggplot(plot_data_melted, aes(x = value, color = actual)) + geo
   ggtitle("Model predicted probs by actual respondent support")+
   xlab("Predicted probability")
 
-ggsave(filename = paste0(plot_dir, '/plot_pred_probs.png')
-       , plot = plot_pred_probs, device = 'png', width = 10, height = 6)
+#ggsave(filename = paste0(plot_dir, '/plot_pred_probs.png'), plot = plot_pred_probs, device = 'png', width = 10, height = 6)
 plot_pred_probs
 ```
 
 
-```{r}
+```{r decile-plots, fig.height=6, fig.width=10}
 ##### PLOT: check rank-order
 
 plot_data_melted[, actual_ind := as.numeric(gsub('.-', '', actual) == gsub('P[(]|[)]', '', variable))]
@@ -178,12 +177,11 @@ plot_deciles = ggplot(plot_data_melted[holdout == 1, .(avg_class = mean(actual_i
   ggtitle("Actual class rate by decile of score - HOLDOUT group")+
   xlab("Score decile")
 plot_deciles
-ggsave(filename = paste0(plot_dir, '/plot_deciles.png')
-       , plot = plot_deciles, device = 'png', width = 10, height = 6)
+#ggsave(filename = paste0(plot_dir, '/plot_deciles.png'), plot = plot_deciles, device = 'png', width = 10, height = 6)
 ```
 
 
-```{r}
+```{r caibration, fig.height=6, fig.width=10}
 ##### PLOT: Check calibration
 
 ggplot(plot_data_melted[, .(.N, actual_pct = mean(actual_ind) * 100), .(model, variable, score = floor(value * 100))]) +
@@ -195,7 +193,7 @@ ggplot(plot_data_melted[, .(.N, actual_pct = mean(actual_ind) * 100), .(model, v
   ylab("Actual %")
 ```
 
-```{r}
+```{r roc, fig.height=6, fig.width=10}
 #### PLOT: ROC curves
 plot_roc = ggplot(plot_data_melted) + 
   geom_roc(n.cuts = 0, aes(d = actual_ind, m = value, color = model)) + facet_grid(~variable)
@@ -208,8 +206,7 @@ plot_roc = plot_roc + geom_text(data = roc_text, aes(x = 1, y = (8-group)/20, la
   ggtitle("Model ROC curves") + xlab("False positive rate") + ylab("True postitive rate")
 plot_roc
 
-ggsave(filename = paste0(plot_dir, '/plot_roc.png')
-       , plot = plot_roc, device = 'png', width = 10, height = 4)
+#ggsave(filename = paste0(plot_dir, '/plot_roc.png'), plot = plot_roc, device = 'png', width = 10, height = 4)
 ```
 
 
