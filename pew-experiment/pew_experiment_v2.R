@@ -19,7 +19,7 @@ run_settings = list(party = 'onfile'   #'onfile' or 'insurvey'
                     , match_rate = 0.5
                     , n_bags = 75
                     , n_landmarks = 200
-                    , refit_bags = T)
+                    , refit_bags = F)
 
 results_id = paste0('party',run_settings$party
                     , '_match', round(run_settings$match_rate*100)
@@ -166,26 +166,43 @@ dist_reg_params = list(sigma = 0.16 #from quick CV
 lasso_frmla = as.formula(paste0("~", paste(c(vars$file_and_survey, vars$file_only), collapse = '+')))
 X_lasso = modmat_all_levs(pew_data, formula = lasso_frmla)
 
-# lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
-#                      , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
-#                      , phi_x = X_lasso
-#                      , family = 'multinomial'
-# )
-lasso_fit = cv.glmnet(x = X_lasso[which(pew_data$matched == 1), ]
-                   , y = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
-                   , family = 'multinomial')
-lasso_fit$Y_hat = data.table(data.frame(predict(lasso_fit, newx = X_lasso, type = 'response')))
+lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
+                     , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                     , phi_x = X_lasso
+                     , family = 'multinomial'
+)
 setnames(lasso_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+
+# lasso_fit = cv.glmnet(x = X_lasso[which(pew_data$matched == 1), ]
+#                    , y = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+#                    , family = 'multinomial')
+# lasso_fit$Y_hat = data.table(data.frame(predict(lasso_fit, newx = X_lasso, type = 'response')))
+ setnames(lasso_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
 
 calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, with = F]))
         , as.numeric(unlist(lasso_fit$Y_hat[pew_data$holdout == 1,])))
 
 results[['logit']] = lasso_fit$Y_hat
 
-ggplot(lasso_fit$Y_hat) + geom_density(aes(x = y_dem.1), color = 'blue') +
-  geom_density(aes(x = y_rep.1), color = 'red') +
-  geom_density(aes(x = y_oth.1), color = 'green') +
-  facet_grid(~pew_data$support)
+# ggplot(lasso_fit$Y_hat) + geom_density(aes(x = y_dem.1), color = 'blue') +
+#   geom_density(aes(x = y_rep.1), color = 'red') +
+#   geom_density(aes(x = y_oth.1), color = 'green') +
+#   facet_grid(~pew_data$support)
+# 
+# nonzero_ind = sort(unique(unlist(lapply(coef(lasso_fit, s = 'lambda.min'), function(c){
+#   which(c[-c(1,2)] != 0) # because of two intercepts
+# })))) + 1
+# nonzero_ind = c(1, nonzero_ind) # always include one intercept
+# 
+# lasso_fit2 = cv.glmnet(x = X_lasso[which(pew_data$matched == 1), nonzero_ind]
+#                       , y = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+#                       , family = 'multinomial'
+#                     , lambda = 0)
+# lasso_fit2$Y_hat = data.table(data.frame(predict(lasso_fit2, newx = X_lasso[, nonzero_ind], type = 'response')))
+# setnames(lasso_fit2$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+# 
+# calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, with = F]))
+#         , as.numeric(unlist(lasso_fit2$Y_hat[pew_data$holdout == 1,])))
 
 #------------------------------------------------------------------------
 ### DIST REG MODELS
@@ -268,7 +285,7 @@ results[['dr_sepbags']] = fit_dr_sepbags$y_hat
 dist_reg_params$kernel_type = 'rbf'
 dist_reg_params$weight_col = 'kmm_weight'
 dist_reg_params$bags = bags_unm
-dist_reg_params$sigma = 0.0035
+dist_reg_params$sigma = 0.003
 
 fit_wdr_sepbags = doBasicDR(data = pew_data, dist_reg_params)
 fit_wdr_sepbags$mse_test
@@ -314,13 +331,13 @@ results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
 
 pew_data[, bag := bags$bags_newdata]
 Y_grp_means = pew_data[surveyed == 1, lapply(.SD, mean), .SDcols = dist_reg_params$outcome, by = bag]
-setnames(Y_grp_means, c('bag',paste0(dist_reg_params$outcome, '_grpmean')))
+setnames(Y_grp_means, c('bag',gsub('_','_hat_',dist_reg_params$outcome)))
 
 Y_grp_means = merge(pew_data[, .(bag)], Y_grp_means, by = 'bag', all.x = T)
 
-Y_grp_means[is.na(y_dem_grpmean), y_dem_grpmean := 0]
-Y_grp_means[is.na(y_rep_grpmean), y_rep_grpmean := 0]
-Y_grp_means[is.na(y_oth_grpmean), y_oth_grpmean := 0]
+Y_grp_means[is.na(y_hat_dem), y_hat_dem := 0]
+Y_grp_means[is.na(y_hat_rep), y_hat_rep := 0]
+Y_grp_means[is.na(y_hat_oth), y_hat_oth := 0]
 
 # add to results
 results[['grpmean']] = Y_grp_means[, -1]
