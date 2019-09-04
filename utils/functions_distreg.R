@@ -206,7 +206,7 @@ doBasicDR = function(data, params){
   
   # make kernel parameters
   kernel_params = getKernParams(X = landmarks$X, kernel_type = params$kernel_type, sigma = params$sigma)
-  print(kernel_params)
+  #print(kernel_params)
   
   # get features
   cat(paste0(Sys.time(), "\t Making features\n"))
