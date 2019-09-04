@@ -47,7 +47,26 @@ getCustomKern = function(X, Y = NULL, kernel_params){
   }
   
   if(!is.null(kernel_params$rbf_ind)){
-    kern_rbf = rbfdot(sigma = kernel_params$sigma)
+    
+    # set sigma using median heuristic
+    if(kernel_params$sigma == 'median'){
+      kern_rbf_1 = rbfdot(sigma = 1)
+      K_rbf_1 = kernelMatrix(kern_rbf_1
+                             , as.matrix(X[, kernel_params$rbf_ind])
+                             , as.matrix(Y[, kernel_params$rbf_ind])
+                             )
+      
+      # rbf kernel is k(x,x') = \exp(-σ \|x - x'\|^2) , we want sigma to be approx 1/median(\|x - x'\|^2)
+      K_rbf_1 = -log(K_rbf_1)
+      sigma_med = 1/median(K_rbf_1)
+      cat('sigma from median:', sigma_med, '\n')
+      
+      kern_rbf = rbfdot(sigma = sigma_med)
+    }else{
+      kern_rbf = rbfdot(sigma = kernel_params$sigma)
+    }
+
+    
     K_rbf = kernelMatrix(kern_rbf
                          , as.matrix(X[, kernel_params$rbf_ind])
                          , as.matrix(Y[, kernel_params$rbf_ind])
