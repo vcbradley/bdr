@@ -1,0 +1,302 @@
+---
+title: "Pew Simulation Results"
+author: "Valerie Bradley"
+date: September 5, 2019
+bibliography: /Users/valeriebradley/Documents/Oxford/mini-project-2/report/biblio.bib
+output:
+  html_document:
+    df_print: paged
+  # pdf_document: 
+  #   number_sections: true
+  #   citation_package: natbib
+---
+
+```{r set-up, echo = F, results='hide', warning=FALSE}
+library(ggplot2)
+library(data.table)
+library(knitr)
+pew_data = fread('~/github/bdr/data/data_recoded.csv')
+
+mse_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams/', pattern = 'mse_', full.names = T)
+mses = rbindlist(lapply(mse_files, function(f) fread(f)))
+mses[, match_rate_bkt := floor(match_rate * 5)]
+
+mses[, length(unique(results_id))]
+```
+
+
+The purpose of this simulation is to test the efficacy of distribution regression for predicting individual-level political support from political polling data.
+
+# distribution regression
+In a typical distribution regression setting, we observe bags of iid samples $\{\mathbf{x}_i^j\}_{i = 1}^{N_j}$ from distributions, and aggregated outcomes for each bag $\mathbf{y}^j$.  The goal is to regress $\mathbf{y}^j$ on the *distributions* of $X^j$, from which we observe iid samples.  In this setting, we observe the outcome at the individual-level, but can't link the outcome to rich covariate data.  Therefore, we aggregate the outcome ourselves as a method for *linking* outcomes to distributions.
+
+## basic steps
+
+- Use `k-means++` to define $b$ bags of (both matched and unmatched) survey respondents 
+- Aggregate $\mathbf{y}_i$ within each bag, for example as the mean of the $y_i$ in each bag $\bar{y}_j = \sum_{i=1}^{N_j} y_i$, $\forall j \in 1, \dots, b$.
+- Assign voterfile observations to bags using distance between voterfile covariates and the $k$ centroids of the bags determined in step 1
+- Embed each observation $\mathbf{x}_i$ in kernel space using some characteristic kernel $k$ with feature map $\phi$.  We need the explicit feature represenation of the kernel embedding in order to calculate the mean, however feature space is potentially infinite-dimensional.  Therefore, we use landmark points $\mathbf{u}_1, \dots, \mathbf{u}_L$ to approximate the kernel embedding, such that $\phi(\mathbf{x}_i) = [k(\mathbf{x}_i, \mathbf{u}_1), \dots, k(\mathbf{x}_i, \mathbf{u}_L)]$.  The landmark points are chosen to be the initial centroids of selected by `k-means++`.
+- Calculate the mean of the embeddings in each bag $\hat{\mu}_j = \frac{1}{n}\sum_{i = 1}^{N_j} \phi(x_i)$, $\forall j \in 1, \dots, k$.  
+- Use regularized regression to estimate $f$ from $\bar{y}_j = f(\hat{\mu}_j) + \epsilon$
+- Predict $y_i$ using $\hat{f}$ from the previous step and the kernel embedding of the $i^\text{th}$ observation, without aggregation, i.e. $\hat{y}_i = \hat{f}(\phi(x_i))$
+
+## parameters
+
+This procedure requires the specification of the following hyperparameters:
+
+1. Number of bags $b$
+2. Number of landmark points $L$
+3. The kernel $k$, and the hyperparamters of the kernel $\theta$
+
+There is not much guidance in the literatre for how to set these parameters.  In distribution regression problems, the number of bags is generally determined by the data.  Landmark points are also commonly used for dimensionality reduction and computational efficiency, so "more is better" (given computaional limitations), however "more" is not defined.  
+
+There is more intuition for kernel choice - for which there are more clearly-defined options for given types of covariate data.  Here we will consider 3 types of kernels: 1) a simple linear kernel 2) an RBF kernel and 3) a custom kernel that combines a linear kernel for categorical covariates with an RBF kernel for age.  The RBF kernels require specification of a bandwidth hyperparameter, $\sigma$.  We set this using the median heuristic [@Garreau2018].  For example, if an RBF kernel is given by $k(x,x') = \exp\left(-\frac{\|x - x'\|^2}{\sigma}\right)$, we would like to choose $\sigma$ to have the same magnitude as $\|x - x'\|^2$, and do this by finding the median of observed $\|x - x'\|^2$.
+
+This simulation will evaluate performance of distribution regression models across different combinations of these hyperparameters.
+
+## weighting
+
+In addition to the basic distribution regression outlined above, we implement a weighted version, intended to correct for the imbalance in observed covariates between the matched responses, unmatched responses and voterfile observations used in training.  In practice, survey respondents are often more partisan, older, and morer likely to be retired or work in an office job than those who choose not to respond to a survey.  Additionally, the respondents that match back to a voterfile are typically more likely to be high-income, white and homeowners than those who don't match back.  Therefore, the covariate distributions of respondents who match back to the voterfile do not match the covariate distributions for the population that we are trying to predict.  
+
+In order to correct for this, we implement two layers of Kernel Mean Matching (KMM) [@Gretton2013].  We first weight matched respondents such that the weighted covariate distributions match those observed in the file.  Then, we use KMM to weight the covariate distributions for unmatched respondents to those of matched respondents.  The weighting must be done in two stages because different covariates are observed for different subsets of data.  Typically only a few covariates are observed for survey responses, while a much richer set of covariates is observed for voterfile data.  The two weighting stages match the kernel means of different sets of observed covariates.
+
+### weighting parameters
+
+KMM weights can be calculated efficiently by formulating the problem as one of quadratic optimization.  We constrain the weights such that the sum is equal to the number of observations being weighted and to be greater than 0 and less than $B$.  $B$ can be interpreted as the maximum number of units represented by a single weighted observation.  If $B$ is too small, the weighted covariate distributions may still be far from the target covariate distributions.  For example, if $B = 1$ then all weights will be 1 and the covariate distributions will remain unadjusted.  However, if $B$ is too large, then one observation may be given too large a weight, and therefore too much influence over weighted estimates.  Here we set $B = 5$ for the first round of weighting and $B = 7$ for the second round of weighting.  These are based on domain knowledge of what is typically considered an acceptable survey weight.
+
+
+## separate bags for matched responses
+
+Another version of the distribution regression model assigns matched responses to their own bags.  In effect, the mean embeddings of the matched observations are just the matched observations themselves, so the regularized regression on the kernel mean embeddings is just simply regularized regression on matched observations plus additional "observations" of the kernel mean embeddings of the unmatched data.  
+
+# simulation overview
+
+The questions we seek to answer in this simulation are:
+
+1. **Overall Performance**: How does distribution regression (DR) perform relative to standard regularized regression?
+2. **Match rate**:  How is performance of DR impacted by the proportion of survey responses that can be matched back to the voterfile?  For example, how much worse is performance if only 10% of responses match back to the voterfile compared t if 90% of responses match back?
+3. **Party as a covariate**:  In this particular application, we observe an incredibly powerful predictor of our outcome, party affiliation (r = `r pew_data[, cor(support == '1-Dem', demo_party %in% c('01-Dem', '03-Lean Dem'))]`).  Model performance is *highly* dependent on where that variable is observed - in the survey, in the voterfile, or in both.  We would like to answer the question: how does performance vary depending on where this variable is observed?
+4. **Number of bags**:  Is there an optimal bag size or number of bags?
+5. **Number of landmarks**: Is there an optimal number of landmark points?
+6. **Separate bags for matched data**:  For the models that assigned matched respondents to their own bags, should we assign bags based on all of the survey data (and then separate out the matches)?  Or should we assign bags only using the unmatched data?
+
+We will measure performance in two ways:
+
+1. MSE in the holdout set
+2. Bias in the estimated proportion of the holdout set that supports the Democratic candidate
+
+
+On each iteration, we will perform the following steps:
+
+1. Randomly select the following hyperparameters:
+    - $b \sim U[40, 200]$
+    - party observed in the survey ('insurvey') or on the voterfile ('onfile') with probability 1/2
+    - $\text{proportion matched} \sim U[0.1, 1]$
+    - $\log L \sim \mathcal{N}(4.7, 0.6)$
+    - for model where matched observations are assigned to their own bags, whether the bags are determined using only the unmatched data, or with all the survey data, each with probability 1/2
+2. Randomly assign observations to one of 4 sets of observations: holdout set ($n = 1000$), voterfile data ($n = 3259$), matched data ($n = 2000 * \text{match_rate}$), or unmatched survey data ($n = 2000 * (1 - \text{match_rate})$).  Probabilities of being surveyed and of matching to the file (given that you responded) are fixed for observations across all simulations
+3. Use KMM to generate observation weights
+4. Select $L$ landmark points
+5. Assign observations to $b$ bags.  $b$ does not include the number of 'separate bags' for matched data.
+6. Fit models
+7. Calclate MSE and bias of estimated % Dem
+
+There are 12 models in total fit on each iteration.  Three are baseline models for comparison:
+
+1. Multinomial LASSO using all of the survey data (matched and unmatched).  This gives an upper bound for what performance we can expect if we were able to match all of the survey data 
+2. Multinomial LASSO using only the matched data.  This serves as a realisic benchmark for what is currently done in the field.
+3. Post-stratification within bags.  This should be a lower bound for performance.
+
+The rest of the models are distribution regression models that vary in 1) kernel specification 2) whether they are weighted or unweighted 2) whether the matched data is assigned to separate bags.  
+
+The models are:
+```{r, echo = F}
+model_desc_tab = data.frame(model_name = unique(mses$model))
+model_desc_tab$kernel = ifelse(grepl('cust',model_desc_tab$model_name), "custom"
+                               , ifelse(grepl('linear',model_desc_tab$model_name), "linear"
+                                        , ifelse(grepl('dr',model_desc_tab$model_name), "rbf", "")))
+model_desc_tab$weighted = ifelse(grepl('wdr',model_desc_tab$model_name), "X", "")
+model_desc_tab$separate_bags = ifelse(grepl('sepbags',model_desc_tab$model_name), "X", "")
+
+kable(model_desc_tab)
+```
+
+
+# the data
+Pew Research conducts regular public opinion research polls measuring poltical attitudes in the US, like [this](https://www.people-press.org/dataset/september-2018-political-survey/) political survey from September 2018.  We use 4 surveys fielded over the 6 months leading up to the 2018 US miderm elections that all ask respondents which party they plan to support in the upcoming election, in addition to a selection of demographic variables (e.g. age, income bracket, education, race, etc.).
+
+
+The data contains `pew_data[, .N]` total responses collected from live interviews on landlines and cell phones.
+
+
+
+# results
+
+```{r data-bias, cache = T, results='hide'}
+pred_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams', pattern = '^party', full.names = T)
+
+holdout_error = rbindlist(lapply(pred_files, function(f){
+  temp = fread(f)
+  holdout_ind = which(temp[model == 'logit',]$holdout == 1)
+  
+  temp$act_class = rep(pew_data$support, length(unique(temp$model)))
+  temp[, pred_class := c('1-Dem', '2-Rep', '3-Oth')[apply(temp[, .(y_hat_dem, y_hat_rep, y_hat_oth)], 1, which.max)]]
+  temp[, correct_class := as.numeric(act_class == pred_class)]
+  
+  holdout_error = cbind(temp[holdout == 1, .(y_hat_dem = mean(y_hat_dem)
+                                      , y_hat_rep = mean(y_hat_rep)
+                                      , y_hat_oth = mean(y_hat_oth)
+                                      , class_rate = mean(correct_class)
+                                      ), by = .(model, results_id, match_rate, n_bags, n_landmarks, refit_bags, party)]
+  , pew_data[holdout_ind, .(y_dem = mean(y_dem)
+                                , y_rep = mean(y_rep)
+                                , y_oth = mean(y_oth)
+                                )]
+        )
+  holdout_error[, y_hat_dem_2way := y_hat_dem/(1 - y_hat_oth)]
+  
+  holdout_error[, error_dem := y_hat_dem - y_dem]
+  holdout_error[, error_rep := y_hat_rep - y_rep]
+  holdout_error[, error_oth := y_hat_oth - y_oth]
+  holdout_error[, error_dem_2way := y_hat_dem_2way - (y_dem/(1-y_oth))]
+  
+  holdout_error
+}))
+```
+
+
+## overall performance relative to benchmarks
+
+The first plot below shows the distribution of test group MSEs from the `r mses[, length(unique(results_id))]` simulation runs.  The variation in MSE for the benchmarks (logit_alldata, logit and groupmean) is mainly due to different test/train splits and to the variation in match rate and party, the rest of the settings remain constant across runs.  However, there is additional variation in test group MSEs for the DR models due to the randomized hyperparameter values.
+
+The second plot shows distribution of the bias in the estimated % Dem across simulation settings.
+
+```{r}
+ggplot(mses, aes(x = model, y = mse )) + geom_boxplot() + 
+  facet_grid(~party) + coord_flip() +
+  ggtitle("Distribution of MSE by model and party")
+```
+
+```{r}
+ggplot(holdout_error, aes(x = model, y = error_dem)) + 
+  geom_hline(yintercept = 0, color = 'red') + facet_grid(~party) + 
+  geom_boxplot() + coord_flip() +
+  ggtitle("Bias in Estimated % Dem")
+```
+
+*Main takeaways*:
+
+- the MSEs were much lower when party is on the voterfile, and can therefore be used as a covariate in regression, but the magnitude of bias is similar
+- unsurprisingly, the lasso using all survey data has the lowest median MSE and least absolute bias. The lasso using only matched data performs the second best according to both metrics
+- when party can be used as a predictor, the DR models with separate bags for matched respondents drastically outperform the DR models with no "individual"-level data with respect to MSE, and slightly outperform in terms of absoute value of bias.  There is little difference in performance when party is not on file.
+- KMM weighting does not seem to drastically affect model performance
+- Also not much difference in MSE or estimator bias across kernels
+
+
+
+
+## model performance by match rate
+
+```{r}
+model_subset = c('logit_alldata', 'logit', 'grpmean', 'dr','wdr','dr_sepbags')
+ggplot(mses[model %in% model_subset], aes(x = match_rate,y = mse, color = model)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  facet_grid(~party) +
+  ggtitle("Holdout MSE by match rate")
+
+ggplot(holdout_error[model %in% model_subset], aes(x = match_rate,y = error_dem, color = model)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = F) + 
+  facet_grid(~party) +
+  ggtitle("Holdout Dem bias by match rate")
+```
+
+*Main takeaways*:
+
+- More improvement as match rate increases when party is on the file - makes sense as higher match rate means more observations of a HIGHLY predictive variable
+- WDR is the only model that shows significant improvement in bias as match rate increases (when party is on thhe file).  This is intuitive because as match rate converges to 1, we only do one round of weighting, which uses party as a weighing covariate
+
+
+## Optimal N bags
+```{r}
+model_subset = c('logit_alldata','logit', 'grpmean', 'dr','wdr','dr_sepbags')
+ggplot(mses[model %in% model_subset], aes(x = n_bags,y = mse, color = model)) + 
+  facet_grid(~party, scales = 'free_y') +
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  ggtitle("Holdout MSE by number of bags")
+
+ggplot(holdout_error[model %in% model_subset], aes(x = n_bags,y = error_dem, color = model)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = F) + 
+  facet_wrap(~party, scales = 'free_y') +
+  ggtitle("Holdout Dem bias by number of bags")
+
+```
+
+## bags with just unmatched data
+
+Fitting bags using just the unmatched data seems to improve model performance slightly for some numbers of bags  (~80).
+
+```{r}
+ggplot(mses[model %in% c('dr_sepbags', 'wdr_sepbags')], aes(x = n_bags,y = mse, color = refit_bags)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  facet_grid(party~model, scales = 'free') +
+  ggtitle("Holdout MSE by number of bags")
+
+ggplot(holdout_error[model %in% c('dr_sepbags', 'wdr_sepbags')], aes(x = n_bags,y = error_dem, color = refit_bags)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  facet_grid(party~model, scales = 'free') +
+  ggtitle("Holdout Dem bias by number of bags")
+
+```
+
+
+## Optimal N Landmarks
+
+- Definitive improvement in MSE and bias for larger numbers of landmarks up to 200.  Inconclusive for numbers larger than 200 due to sparsity of simulations.  Need to run more to examine this.
+- Even at 200 landmarks, simple logistic regression with matched data outperforms any DR model
+
+```{r}
+model_subset = c('logit', 'grpmean', 'dr','wdr','dr_sepbags')
+ggplot(mses[model %in% model_subset], aes(x = n_landmarks,y = mse_relall, color = model)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  facet_wrap(~party, scales = 'free') +
+  ggtitle("Holdout MSE by match rate")
+
+ggplot(holdout_error[model %in% model_subset], aes(x = n_landmarks,y = error_dem, color = model)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = F) + 
+  facet_wrap(~party, scales = 'free') +
+  ggtitle("Holdout Dem bias by number of landmarks")
+
+```
+
+## landmarks x bags
+```{r}
+ggplot(mses[model %in% c('dr','wdr','dr_sepbags') & party == 'insurvey'], aes(x = n_landmarks,y = n_bags)) + 
+  geom_point(aes(color = mse_relall), alpha = 0.6) +
+  #geom_smooth(se = F) + 
+  facet_wrap(~model, scales = 'free') +
+  ggtitle("Holdout Dem bias by number of landmarks")
+```
+
+# conclusions
+
+At this stage, it appears that DR is not an improvement on simple logistic regression with the subset of matched respondents with this data set.  
+
+Party is incredibly predictive of outcome, so how we treat it has an enormous impact on model performance and conclusions from this simulation.  This level of predictiveness is not realistic in most settings, however, because in this case party ID is collected at the same time as support, and therefor contains almost the same information as the outcome. We don't generally have voterfile data with *that* level of predictiveness.
+
+
+## next steps
+
+- more sims with more landmarks
+- **more data**, both N and richness of covariate data (incl. spatial data)
+- custom kernel that separates out/gives more weight to party?
+- improve weighting settings since that does seem to somewhat help with bias
+
+
