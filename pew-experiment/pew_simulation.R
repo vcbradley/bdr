@@ -17,7 +17,8 @@ getDoParWorkers()
 setwd('~/github/bdr')
 x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
 
-results_file = '~/github/bdr/pew-experiment/results/pew_simulation_results.csv'
+
+results_dir = '~/github/bdr/pew-experiment/results/sim_randparams/'
 
 #-----------------------------------------------
 ### Read in data
@@ -28,53 +29,23 @@ n_holdout = 1000
 n_surveyed = 2000
 
 #-----------------------------------------------
-### MAKE PARAM GRID
-party_list = c('insurvey', 'onfile')
-match_rate_list = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1)
-n_bags_list = c(50, 75, 100, 125)
-n_landmarks_list = c(75, 100, 150, 200, 300, 400)
-refit_bags_list = c(F, T)
+# ### MAKE PARAM GRID
+# party_list = c('insurvey', 'onfile')
+# match_rate_list = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9)
+# n_bags_list = c(50, 75, 100, 125)
+# #avg_n_bag = c(10, 15, 20, 25, 30)
+# n_landmarks_list = c(75, 100, 150, 200, 300, 400)
+# refit_bags_list = c(F, T)
+# 
+# 
+# sim_params = expand.grid(match_rate = match_rate_list
+#                          , n_bags = n_bags_list
+#                          , n_landmarks = n_landmarks_list
+#                          , refit_bags = refit_bags_list
+#                          , party = party_list
+#                          )
+# sim_params
 
-
-sim_params = expand.grid(match_rate = match_rate_list
-                         , n_bags = n_bags_list
-                         , n_landmarks = n_landmarks_list
-                         , refit_bags = refit_bags_list
-                         , party = party_list
-                         )
-sim_params
-
-# #-----------------------------------------------
-# # Make test and train sets - FIXED FOR SIMULATION
-# n_holdout = 1000
-# n_surveyed = 2000
-# 
-# ## holdout
-# holdout_ind = sample.int(size = n_holdout, nrow(pew_data))
-# pew_data[, holdout := 0]
-# pew_data[holdout_ind, holdout := 1]
-# 
-# ## surveyed
-# surveyed_ind = sample(which(pew_data$holdout == 0)
-#                       , size = n_surveyed
-#                       , prob = pew_data[holdout == 0, p_surveyed])
-# pew_data[, surveyed := 0]
-# pew_data[surveyed_ind, surveyed := 1]
-# 
-# ## matched
-# matched_ind = c()
-# possible_ind = surveyed_ind
-# while(length(possible_ind) > 0){
-#   # append another 10
-#   matched_ind = c(matched_ind, sample(possible_ind, size = 10, prob = pew_data[possible_ind, p_matched]))
-#   
-#   #eliminate those chosen
-#   possible_ind = surveyed_ind[!surveyed_ind %in% matched_ind]
-# }
-# length(matched_ind)
-# 
-# #voterfile
-# pew_data[surveyed == 0 & holdout == 0, voterfile := 1]
 
 
 #---------------------------------------------------------------------------
@@ -95,11 +66,28 @@ vars$file_only_partyinsurvey = vars$all[!vars$all %in% c(vars$survey_partyinsurv
 
 #---------------------------------------------------------------------------
 ## RUN SIMULATION
-results_mses = foreach(i=1:10) %dopar%{
-  
+file.remove(paste0(results_dir, 'results_mses.csv'))
+
+results_mses = foreach(i=1:20) %dopar%{
+  run_settings = list()
   #run_settings = data.frame(match_rate = 0.1, n_bags = 125, n_landmarks = 100, refit_bags = F, party = 'onfile')
   # SET PARAMS
-  run_settings = sim_params[i,]
+  #run_settings = sim_params[i,]
+  
+  # # randomly choose settings
+  run_settings$party = sample(c('insurvey', 'onfile'), size = 1)
+  run_settings$refit_bags = sample(c(T, F), prob = c(0.4, 0.6), size = 1)
+  run_settings$match_rate = runif(min = 0.1, max = 1, n = 1)
+  run_settings$n_bags = round(runif(min = 40, max = 150, n = 1))
+  #run_settings$n_bags = round(runif(min = 150, max = 200, n = 1))
+  #run_settings$n_landmarks = round(exp(rnorm(mean = 4.7, sd = 0.6, n = 1)))
+  #run_settings$n_landmarks = round(exp(rnorm(mean = 3.5, sd = 0.35, n = 1)))
+  run_settings$n_landmarks = rnorm(mean = 300, sd = 75, n = 100)
+  # run_settings = list(party='onfile'
+  #                     ,refit_bags=TRUE
+  #                     ,match_rate=0.319947048882023
+  #                     ,n_bags=94 
+  #                     ,n_landmarks=145 )
   cat(i, '\n')
   cat(paste(names(run_settings),run_settings), '\n')
   
@@ -120,6 +108,7 @@ results_mses = foreach(i=1:10) %dopar%{
     vars$survey = vars$survey_partyonfile
     vars$file_only = vars$file_only_partyonfile
   }
+  regression_vars = c(vars$file_and_survey, vars$file_only)
   
   
   #-----------------------------------------
@@ -172,7 +161,6 @@ results_mses = foreach(i=1:10) %dopar%{
   ## fix landmarks
   cat("\tGetting landmarks\n")
   n_landmarks = run_settings$n_landmarks
-  regression_vars = c(vars$file_and_survey, vars$file_only)
   
   landmarks = getLandmarks(data = pew_data
                            , vars = regression_vars
@@ -236,23 +224,29 @@ results_mses = foreach(i=1:10) %dopar%{
   }))
   
   # write results out to file
-  write.table(results, file = paste0('~/github/bdr/pew-experiment/results/simulation/', results_id, '.csv')
+  write.table(results, file = paste0(results_dir, results_id, '.csv')
               , row.names = F, sep = ',')
   
   # calculate MSEs
   mses = unlist(lapply(results_temp, function(r){
-    calcMSE(Y = as.numeric(unlist(pew_data[, dist_reg_params$outcome, with = F]))
-            , Y_pred = as.numeric(unlist(r)))
+    calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, with = F]))
+            , Y_pred = as.numeric(unlist(r[pew_data$holdout == 1,])))
   }))
   
-  data.table(results_id
+  
+  mses = data.table(results_id
              , match_rate = run_settings$match_rate
              , n_bags = run_settings$n_bags
              , n_landmarks = run_settings$n_landmarks
              , refit_bags = run_settings$refit_bags
+             , party = run_settings$party
              , model = names(mses)
-             , mses
+             , mse = mses
+             , mse_relall = mses/mses['logit_alldata']
+             , mse_rellogit = mses/mses['logit']
              )
+  
+  write.table(mses, file = paste0(results_dir, 'mse_', results_id, '.csv'), row.names = F, sep = ',')
   
 }
 
