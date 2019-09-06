@@ -14,9 +14,9 @@ x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
 # read in *recoded* data
 pew_data = fread('data/data_recoded.csv')
 
-run_settings = list(party = 'onfile'   #'onfile' or 'insurvey'
+run_settings = list(party = 'insurvey'   #'onfile' or 'insurvey'
                     , n_surveyed = 2000
-                    , match_rate = 0.5
+                    , match_rate = .1
                     , n_bags = 75
                     , n_landmarks = 200
                     , refit_bags = F)
@@ -26,6 +26,18 @@ results_id = paste0('party',run_settings$party
                     , '_bags', run_settings$n_bags
                     , '_lmks', run_settings$n_landmarks
                     , '_refitbags', run_settings$refit_bags)
+
+
+## get test train sets
+testtrain = getTestTrain(data = pew_data
+                         , n_holdout = 1000
+                         , n_surveyed = run_settings$n_surveyed
+                         , n_matched = run_settings$n_surveyed * run_settings$match_rate
+                         , p_surveyed = pew_data$p_surveyed
+                         , p_matched = pew_data$p_matched
+)
+pew_data[, unmatched := as.numeric(surveyed == 1 & matched == 0)]
+pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 
 
 #categorize variables
@@ -39,21 +51,6 @@ if(run_settings$party == 'insurvey'){
 vars$file_and_survey = c('demo_sex', 'demo_age_bucket', 'demo_income', 'demo_region', 'demo_race', 'demo_hispanic')
 vars$all = vars$all[-which(grepl('demo_state|month_called', vars$all))]
 vars$file_only = vars$all[!vars$all %in% c(vars$survey, vars$file_and_survey)]
-
-
-
-
-
-## get test train sets
-testtrain = getTestTrain(data = pew_data
-                         , n_holdout = 1000
-                         , n_surveyed = run_settings$n_surveyed
-                         , n_matched = run_settings$n_surveyed * run_settings$match_rate
-                         , p_surveyed = pew_data$p_surveyed
-                         , p_matched = pew_data$p_matched
-)
-pew_data[, unmatched := as.numeric(surveyed == 1 & matched == 0)]
-pew_data[, .(.N, mean(y_dem)), .(holdout, surveyed, matched, voterfile)]
 
 
 
@@ -184,6 +181,25 @@ calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, wi
 
 results[['logit']] = lasso_fit$Y_hat
 
+
+
+## LASSO - ALL DATA
+
+lasso_alldata_fit = fitLasso(mu_hat = X_lasso
+                     , Y_bag = as.matrix(pew_data[, .SD, .SDcols = dist_reg_params$outcome])
+                     , phi_x = X_lasso
+                     , family = 'multinomial'
+)
+setnames(lasso_alldata_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+
+calcMSE(Y = as.numeric(unlist(pew_data[holdout == 1, dist_reg_params$outcome, with = F]))
+        , as.numeric(unlist(lasso_alldata_fit$Y_hat[pew_data$holdout == 1,])))
+
+results[['logit_alldata']] = lasso_alldata_fit$Y_hat
+
+
+###########
+
 # ggplot(lasso_fit$Y_hat) + geom_density(aes(x = y_dem.1), color = 'blue') +
 #   geom_density(aes(x = y_rep.1), color = 'red') +
 #   geom_density(aes(x = y_oth.1), color = 'green') +
@@ -255,6 +271,16 @@ fit_dr = doBasicDR(data = pew_data, dist_reg_params)
 fit_dr$mse_test
 results[['dr']] = fit_dr$y_hat
 
+### fit DR - NO WEIGHTING -- CUSTOM KERNEL
+dist_reg_params$kernel_type = 'rbf_age'
+dist_reg_params$weight_col = NULL
+dist_reg_params$bags = bags
+dist_reg_params$sigma = 2.6
+
+fit_dr_cust = doBasicDR(data = pew_data, dist_reg_params)
+fit_dr_cust$mse_test
+results[['dr_cust']] = fit_dr_cust$y_hat
+
 
 
 ### fit DR -- WEIGHTED
@@ -313,17 +339,18 @@ fit_dr_sepbags_cust = doBasicDR(data = pew_data, dist_reg_params)
 fit_dr_sepbags_cust$mse_test
 results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
 
-# # quick CV
-# 
-# #sigmas = exp(seq(log(0.005), log(5), length.out = 20))
-# sigmas = seq(2,3, length.out = 10)
-# 
-# cust_mse = unlist(lapply(sigmas, function(s){
-#   dist_reg_params$sigma = s
-#   try(doBasicDR(data = pew_data, dist_reg_params)$mse_test)
-# }))
-# 
-# plot(x = sigmas, y = cust_mse)
+# quick CV
+
+sigmas = exp(seq(log(0.005), log(5), length.out = 20))
+#sigmas = seq(0.001,7, length.out = 20)
+
+cust_mse = unlist(lapply(sigmas, function(s){
+  dist_reg_params$sigma = s
+  try(doBasicDR(data = pew_data, dist_reg_params)$mse_test)
+}))
+sigmas[which.min(cust_mse)]
+
+plot(x = sigmas, y = cust_mse)
 
 
 #------------------------------------------------------------------------
