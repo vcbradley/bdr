@@ -1,93 +1,99 @@
 
-library(doMC)
-library(parallel)
+library(ggplot2)
+library(data.table)
 
-detectCores(all.tests = FALSE, logical = TRUE)
-registerDoMC(8)
-getDoParWorkers()
-
-
-##### Create separate CSVs
-
-results_file = '~/github/bdr/pew-experiment/results/pew_simulation_results.csv'
-nrows_file = system(paste0('wc -l ', results_file), intern = T)
-nrows_file = as.numeric(strsplit(nrows_file, " ")[[1]][2])
-
-chunk_size = 5259 * 12
-
-fread(results_file, nrows = 10)
-
-rows_processed = 0
-while(rows_processed < nrows_file){
-  temp = fread(results_file, nrows = chunk_size, skip = rows_processed + 1)
-  setnames(temp, c("match_rate" , "n_bags", "n_landmarks", "refit_bags", "party", "model", "y_hat_dem", "y_hat_rep", "y_hat_oth" ))
-  
-  temp[, results_id := paste0('match', round(match_rate*100)
-                , '_bags', n_bags
-                , '_lmks', n_landmarks
-                , '_refitbags', refit_bags
-                , '_party',party)]
-  
-  results_ids = unique(temp$results_id)
-  
-  lapply(results_ids, function(id){
-    file = paste0('~/github/bdr/pew-experiment/results/simulation/results_', id, '.csv')
-    exists = file.exists(file)
-    
-    write.table(temp[results_id == id,], file = file, append = exists, col.names = !exists, row.names = FALSE, sep = ',')
-  })
-  
-
-  
-  rows_processed = rows_processed + chunk_size
-}
-
-
-
-
+setwd('~/github/bdr')
 pew_data = fread('data/data_recoded.csv')
-results_summary = list()
-file_dir = '~/github/bdr/pew-experiment/results/simulation/'
-file_list = list.files(file_dir)
 
-results_summary = foreach(i=1:length(file_list)) %dopar%{
-  f = file_list[i]
-  #f = 'results_match70_bags75_lmks200_refitbagsTRUE_partyonfile.csv'
-  temp = fread(paste0(file_dir, '/', f))
+
+mse_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams/', pattern = 'mse_', full.names = T)
+mses = rbindlist(lapply(mse_files, function(f) fread(f)))
+
+mses[, length(unique(results_id))]
+
+mses[, match_rate_bkt := floor(match_rate * 5)]
+
+ggplot(mses, aes(x = mse, color = model)) + geom_density() + facet_grid(party~.)
+
+mses[mse_rellogit < 1 & model != 'logit_alldata']
+
+ggplot(mses[match_rate < 0.2 ], aes(x = mse, color = model)) + geom_density()
+
+ggplot(mses, aes(x = match_rate, y = mse, color = model)) + 
+  geom_point() +
+  #geom_smooth() + 
+  facet_grid(party~model)
+
+ggplot(mses[refit_bags == F], aes(x = n_landmarks, y = mse, color = n_bags)) + 
+  geom_point() +
+  #geom_smooth() + 
+  facet_grid(party~model)
+
+
+ggplot(mses[model == 'dr_cust' & party == 'onfile']) + 
+  geom_point(aes(x = n_bags, y = n_landmarks, color = mse)) +
+  facet_grid(~refit_bags)
+
+ggplot(mses[model == 'dr_cust']) + geom_contour(aes(x = n_landmarks, y = n_bags, z = mse), bins = 2)
+
+ggplot(mses[model == 'dr_cust' & party == 'insurvey' & refit_bags == F]) + 
+  geom_point(aes(x = n_landmarks, y = mse_relall, color = n_bags)) + facet_wrap(~match_rate_bkt)
+
+
+
+pred_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams', pattern = '^party', full.names = T)
+
+holdout_error = rbindlist(lapply(pred_files, function(f){
+  temp = fread(f)
+  holdout_ind = which(temp[model == 'logit',]$holdout == 1)
   
-  mses = rbindlist(lapply(unique(temp$model), function(m){
-    data.table(results_id = temp$results_id[1]
-               , model = m
-               , mse = calcMSE(Y = as.numeric(unlist(pew_data[, c(y_dem, y_rep, y_oth)]))
-            , Y_pred = as.numeric(unlist(temp[model == m, .(y_hat_dem, y_hat_rep, y_hat_oth)]))))
-  }))
+  temp$act_class = rep(pew_data$support, length(unique(temp$model)))
+  temp[, pred_class := c('1-Dem', '2-Rep', '3-Oth')[apply(temp[, .(y_hat_dem, y_hat_rep, y_hat_oth)], 1, which.max)]]
+  temp[, correct_class := as.numeric(act_class == pred_class)]
   
-  mses = mses[, mse_rel := mse/mses$mse[model == 'logit_alldata']]
+  holdout_error = cbind(temp[holdout == 1, .(y_hat_dem = mean(y_hat_dem)
+                                      , y_hat_rep = mean(y_hat_rep)
+                                      , y_hat_oth = mean(y_hat_oth)
+                                      , class_rate = mean(correct_class)
+                                      ), by = .(model, results_id, match_rate, n_bags, n_landmarks, refit_bags, party)]
+  , pew_data[holdout_ind, .(y_dem = mean(y_dem)
+                                , y_rep = mean(y_rep)
+                                , y_oth = mean(y_oth)
+                                )]
+        )
+  holdout_error[, y_hat_dem_2way := y_hat_dem/(1 - y_hat_oth)]
   
-  cbind(temp[1,1:5], mses)
+  holdout_error[, error_dem := y_hat_dem - y_dem]
+  holdout_error[, error_rep := y_hat_rep - y_rep]
+  holdout_error[, error_oth := y_hat_oth - y_oth]
+  holdout_error[, error_dem_2way := y_hat_dem_2way - (y_dem/(1-y_oth))]
   
+  holdout_error
+}))
+
+holdout_error
+
+
+ggplot(holdout_error[model %in% c('logit', 'logit_alldata', 'dr', 'dr_sepbags', 'wdr')]) + 
+  geom_density(aes(x = error_dem, color= model)) + 
   
-}
+  facet_grid(~party)
 
-results_all = rbindlist(results_summary)
+ggplot(holdout_error) + 
+  geom_density(aes(x = error_rep, color= model)) + 
+  facet_grid(~party)
 
-
-
-results_all[model == 'dr_cust' & mse_rel < 0.9 , results_id]
-
-results_all[(results_all[model == 'dr_cust' & mse_rel < 0.9 , results_id][1] == results_id) & model == 'logit_alldata',]
-
-
-which(results_all[,model == 'dr_sepbags' & mse_rel > 1,])
-
-sim_params[104,]
-
-ggplot(results_all, aes(x = n_bags, y = n_landmarks, color = mse)) + facet_grid(match_rate ~ model) + geom_point()
-
-ggplot(results_all, aes(x = n_bags, y = mse_rel, color = model)) + geom_point()
-
-ggplot(results_all[party == 'onfile' & model %in% c('dr_cust')]) + geom_density(aes(x = mse, color = factor(interaction(n_bags,match_rate)), lty = refit_bags))
-ggplot(results_all[party == 'onfile' & model %in% c('dr')]) + geom_density(aes(x = mse, color = factor(interaction(n_bags,match_rate)), lty = refit_bags))
+ggplot(holdout_error) + 
+  geom_density(aes(x = error_oth, color= model)) + 
+  facet_grid(~party)
 
 
+ggplot(holdout_error) + 
+  geom_density(aes(x = error_dem_2way, color= model)) + 
+  facet_grid(~party)
+
+# classification rate
+ggplot(holdout_error[model %in% c('logit', 'logit_alldata', 'dr', 'dr_sepbags', 'wdr')]) +
+  geom_density(aes(x = class_rate, color = model)) +
+  facet_grid(~party)
 
