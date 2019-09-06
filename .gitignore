@@ -5,3 +5,4 @@ data/fl.2010*
 data/va.2010*
 pew-experiment/results/*.RData
 pew-experiment/results/simulation/*
+pew-experiment/results/sim_randparams/*
