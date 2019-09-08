@@ -8,7 +8,7 @@ library(foreign)
 
 
 setwd('~/github/bdr')
-source('functions.R')
+x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
 
 # import data
 data_sept18 = data.table(read.spss('data/Sept18/Sept18 public.sav', to.data.frame = T), stringsAsFactors = F)
@@ -35,6 +35,7 @@ data_recoded[, p_surveyed :=
              - 3 * as.numeric(demo_party == "99-DK/refused") 
              + 1.5 * as.numeric(demo_education %in% c('01-postgrad', '02-bach'))
              + 3 * as.numeric(demo_ideology == 'Very conservative' | demo_ideology == 'Very liberal')
+             + -0.1 * month_called
              ]
 data_recoded[, p_surveyed := exp(p_surveyed)/(1 + exp(p_surveyed))]
 hist(data_recoded[, p_surveyed])
@@ -43,6 +44,7 @@ data_recoded[, .(.N, mean(p_surveyed)), .(demo_age_bucket)][order(demo_age_bucke
 data_recoded[, .(.N, mean(p_surveyed)), .(demo_mode)][order(demo_mode)]
 data_recoded[, .(.N, mean(p_surveyed)), .(demo_party)][order(demo_party)]
 data_recoded[, .(.N, mean(p_surveyed)), .(demo_ideology)][order(demo_ideology)]
+data_recoded[, .(.N, mean(p_surveyed)), .(month_called)][order(month_called)]
 
 
 
@@ -51,11 +53,12 @@ data_recoded[, p_matched := NULL]
 data_recoded[, p_matched :=
                -2 +
                -2 * as.numeric(demo_mode == 'landline') 
-             + 3 * as.numeric(demo_race == 'W')
+             +  as.numeric(demo_phonetype == '01-Both') 
+             - 3 * as.numeric(demo_race == 'W')
              + -2 * as.numeric(demo_reg == '03-No')
              + -1 * as.numeric(demo_hhsize == 2)
              + -2 * as.numeric(demo_hhsize == 3)
-             + 2 *age_scaled
+             + 2 *age_scaled^2
              + as.numeric(demo_income)/3
              - 4* as.numeric(demo_income == '99-DK/refused')
              ]
@@ -84,4 +87,4 @@ summary(data_recoded[, age_num_imp])
 data_recoded[, age_scaled := scale(age_num_imp)/5]
 
 # write to CSV
-write.csv(data_recoded, file = 'data/data_recoded.csv', row.names = F)
+write.csv(data_recoded, file = 'data/data_recoded_v2.csv', row.names = F)
