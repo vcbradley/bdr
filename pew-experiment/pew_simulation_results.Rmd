@@ -21,7 +21,15 @@ mse_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams/', pa
 mses = rbindlist(lapply(mse_files, function(f) fread(f)))
 mses[, match_rate_bkt := floor(match_rate * 5)]
 
-mses[, length(unique(results_id))]
+
+rand_pred = data.frame(y_hat = pew_data[, sample(c('1-Dem','2-Rep','3-Other'), size = nrow(pew_data)
+                                                 , replace = T
+                                                 #, prob = c(0.48, 0.42, 0.1)
+                                                 )])
+rand_pred = modmat_all_levs(~-1 + y_hat, data = rand_pred)
+
+calcMSE(Y = unlist(pew_data[, .(y_dem, y_rep, y_oth)]), Y_pred = unlist(rand_pred))
+
 ```
 
 
@@ -48,7 +56,7 @@ This procedure requires the specification of the following hyperparameters:
 2. Number of landmark points $L$
 3. The kernel $k$, and the hyperparamters of the kernel $\theta$
 
-There is not much guidance in the literatre for how to set these parameters.  In distribution regression problems, the number of bags is generally determined by the data.  Landmark points are also commonly used for dimensionality reduction and computational efficiency, so "more is better" (given computaional limitations), however "more" is not defined.  
+There is not much guidance in the literature for how to set these parameters.  In distribution regression problems, the number of bags is generally determined by the data.  Landmark points are also commonly used for dimensionality reduction and computational efficiency, so "more is better" (given computaional limitations), however "more" is not defined.  
 
 There is more intuition for kernel choice - for which there are more clearly-defined options for given types of covariate data.  Here we will consider 3 types of kernels: 1) a simple linear kernel 2) an RBF kernel and 3) a custom kernel that combines a linear kernel for categorical covariates with an RBF kernel for age.  The RBF kernels require specification of a bandwidth hyperparameter, $\sigma$.  We set this using the median heuristic [@Garreau2018].  For example, if an RBF kernel is given by $k(x,x') = \exp\left(-\frac{\|x - x'\|^2}{\sigma}\right)$, we would like to choose $\sigma$ to have the same magnitude as $\|x - x'\|^2$, and do this by finding the median of observed $\|x - x'\|^2$.
 
