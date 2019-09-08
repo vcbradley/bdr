@@ -28,25 +28,6 @@ pew_data = fread('data/data_recoded.csv')
 n_holdout = 1000
 n_surveyed = 2000
 
-#-----------------------------------------------
-# ### MAKE PARAM GRID
-# party_list = c('insurvey', 'onfile')
-# match_rate_list = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9)
-# n_bags_list = c(50, 75, 100, 125)
-# #avg_n_bag = c(10, 15, 20, 25, 30)
-# n_landmarks_list = c(75, 100, 150, 200, 300, 400)
-# refit_bags_list = c(F, T)
-# 
-# 
-# sim_params = expand.grid(match_rate = match_rate_list
-#                          , n_bags = n_bags_list
-#                          , n_landmarks = n_landmarks_list
-#                          , refit_bags = refit_bags_list
-#                          , party = party_list
-#                          )
-# sim_params
-
-
 
 #---------------------------------------------------------------------------
 ##categorize variables
