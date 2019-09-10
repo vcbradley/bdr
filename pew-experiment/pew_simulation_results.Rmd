@@ -15,9 +15,14 @@ output:
 library(ggplot2)
 library(data.table)
 library(knitr)
+library(R.utils)
+x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
+
 pew_data = fread('~/github/bdr/data/data_recoded.csv')
 
-mse_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams/', pattern = 'mse_', full.names = T)
+results_dir = '~/github/bdr/pew-experiment/results/sim_randparams_v2/'
+
+mse_files = list.files(results_dir, pattern = 'mse_', full.names = T)
 mses = rbindlist(lapply(mse_files, function(f) fread(f)))
 mses[, match_rate_bkt := floor(match_rate * 5)]
 
@@ -30,6 +35,11 @@ rand_pred = modmat_all_levs(~-1 + y_hat, data = rand_pred)
 
 calcMSE(Y = unlist(pew_data[, .(y_dem, y_rep, y_oth)]), Y_pred = unlist(rand_pred))
 
+party_id = pew_data[, .(y_dem = as.numeric(grepl('Dem', demo_party))
+                        , y_rep = as.numeric(grepl('Rep', demo_party))
+                        , y_oth = as.numeric(!grepl('Rep|Dem', demo_party))
+                        )]
+calcMSE(Y = unlist(pew_data[, .(y_dem, y_rep, y_oth)]), Y_pred = unlist(party_id))
 ```
 
 
@@ -141,7 +151,7 @@ The data contains `pew_data[, .N]` total responses collected from live interview
 # results
 
 ```{r data-bias, cache = T, results='hide'}
-pred_files = list.files('~/github/bdr/pew-experiment/results/sim_randparams', pattern = '^party', full.names = T)
+pred_files = list.files(results_dir, pattern = '^party', full.names = T)
 
 holdout_error = rbindlist(lapply(pred_files, function(f){
   temp = fread(f)
