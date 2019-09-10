@@ -7,3 +7,4 @@ pew-experiment/results/*.RData
 pew-experiment/results/simulation/*
 pew-experiment/results/sim_randparams/*
 pew-experiment/results/archive/
+pew-experiment/results/sim_randparams_v2/*
