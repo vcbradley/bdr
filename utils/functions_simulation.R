@@ -26,7 +26,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
                  , n_bags = dist_reg_params$n_bags
                  , newdata = pew_data[, vars$file_and_survey, with = F])
   
-  # give each matched data point its own bag
+  # if we're refitting bags, create new bag just using the unmatched survey data
   if(dist_reg_params$refit_bags){
     bags_unm = getBags(data = pew_data[unmatched == 1,]
                        , vars = vars$file_and_survey
@@ -35,6 +35,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
   }else{
     bags_unm = bags
   }
+  # give each matched data point its own bag
   bags_unm$bags_newdata[pew_data$matched == 1] <- seq(dist_reg_params$n_bags + 1, length = sum(pew_data$matched))
   
   #-----------------------------------------
