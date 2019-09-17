@@ -222,7 +222,7 @@ getTestTrain = function(data, n_holdout, n_surveyed, n_matched, p_surveyed = NUL
     data[matched_ind, matched := 1]
     data[-matched_ind, matched := 0]
   }else{
-    data[, matched := 1]
+    data[, matched := 0]
   }
   
   data[, voterfile := ifelse(holdout == 1 | (surveyed == 1 & matched == 0), 0, 1)]
