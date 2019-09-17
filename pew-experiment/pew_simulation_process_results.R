@@ -97,3 +97,7 @@ ggplot(holdout_error[model %in% c('logit', 'logit_alldata', 'dr', 'dr_sepbags', 
   geom_density(aes(x = class_rate, color = model)) +
   facet_grid(~party)
 
+
+results_dir = '~/github/bdr/pew-experiment/results/sim_randparams_v2/'
+rmarkdown::render(input = '~/github/bdr/pew-experiment/pew_experiment.Rmd'
+                    , output_dir = results_dir)
