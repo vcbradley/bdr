@@ -11,16 +11,17 @@ output:
   #   citation_package: natbib
 ---
 
-```{r set-up, echo = F, results='hide', warning=FALSE}
+```{r set-up, echo = F, results='hide', warning=FALSE, message=F}
 library(ggplot2)
 library(data.table)
 library(knitr)
 library(R.utils)
-x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
-
-pew_data = fread('~/github/bdr/data/data_recoded.csv')
 
 results_dir = '~/github/bdr/pew-experiment/results/sim_randparams_v2/'
+
+x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
+
+pew_data = fread('~/github/bdr/data/data_recoded_v2.csv')
 
 mse_files = list.files(results_dir, pattern = 'mse_', full.names = T)
 mses = rbindlist(lapply(mse_files, function(f) fread(f)))
@@ -41,6 +42,7 @@ party_id = pew_data[, .(y_dem = as.numeric(grepl('Dem', demo_party))
                         )]
 calcMSE(Y = unlist(pew_data[, .(y_dem, y_rep, y_oth)]), Y_pred = unlist(party_id))
 ```
+
 
 
 The purpose of this simulation is to test the efficacy of distribution regression for predicting individual-level political support from political polling data.
@@ -202,94 +204,119 @@ ggplot(holdout_error, aes(x = model, y = error_dem)) +
   ggtitle("Bias in Estimated % Dem")
 ```
 
-*Main takeaways*:
-
-- the MSEs were much lower when party is on the voterfile, and can therefore be used as a covariate in regression, but the magnitude of bias is similar
-- unsurprisingly, the lasso using all survey data has the lowest median MSE and least absolute bias. The lasso using only matched data performs the second best according to both metrics
-- when party can be used as a predictor, the DR models with separate bags for matched respondents drastically outperform the DR models with no "individual"-level data with respect to MSE, and slightly outperform in terms of absoute value of bias.  There is little difference in performance when party is not on file.
-- KMM weighting does not seem to drastically affect model performance
-- Also not much difference in MSE or estimator bias across kernels
 
 
+```{r plot-functions, echo = F, results='hide'}
+plot_mse = function(data, x, x_lab = NULL){
+  if(is.null(x_lab)){
+    x_lab = gsub("_", " ", x)
+  }
+  
+  ggplot(data = data, aes(x = get(x), y = mse, color = model)) + 
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  xlab(x_lab) +
+  ylab("MSE") +
+  facet_grid(~party, labeller = labeller(party = function(p) paste0('party: ', p))) + 
+  theme_light() +
+  ggtitle(paste("Holdout MSE by", x_lab))
+}
 
+plot_bias = function(data, x, x_lab = NULL){
+  if(is.null(x_lab)){
+    x_lab = gsub("_", " ", x)
+  }
+  
+  ggplot(data, aes(x = get(x),y = error_dem, color = model)) + 
+  geom_hline(yintercept = 0, color = 'red') +
+  geom_point(alpha = 0.2) +
+  xlab(x_lab) +
+  ylab("Bias of estimated % Dem") +
+  geom_smooth() +
+  facet_grid(party~model, labeller = labeller(party = function(p) paste0('party: ', p))) +
+  theme_light() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle(paste("Holdout Dem bias by", x_lab))
+}
+```
 
 ## model performance by match rate
 
-```{r}
+```{r plot-matchrate-mse, fig.height=4, fig.width=8}
 model_subset = c('logit_alldata', 'logit', 'grpmean', 'dr','wdr','dr_sepbags')
-ggplot(mses[model %in% model_subset], aes(x = match_rate,y = mse, color = model)) + 
-  geom_point(alpha = 0.2) +
-  geom_smooth() + 
-  facet_grid(~party) +
-  ggtitle("Holdout MSE by match rate")
 
-ggplot(holdout_error[model %in% model_subset], aes(x = match_rate,y = error_dem, color = model)) + 
-  geom_point(alpha = 0.2) +
-  geom_smooth(se = F) + 
-  facet_grid(~party) +
-  ggtitle("Holdout Dem bias by match rate")
+plot_mse(mses[model %in% model_subset], x = 'match_rate')
 ```
 
-*Main takeaways*:
+```{r plot-matchrate-bias, fig.with = 10, fig.height = 5}
+plot_bias(holdout_error[model %in% model_subset], x = 'match_rate')
+```
 
-- More improvement as match rate increases when party is on the file - makes sense as higher match rate means more observations of a HIGHLY predictive variable
-- WDR is the only model that shows significant improvement in bias as match rate increases (when party is on thhe file).  This is intuitive because as match rate converges to 1, we only do one round of weighting, which uses party as a weighing covariate
 
 
 ## Optimal N bags
-```{r}
-model_subset = c('logit_alldata','logit', 'grpmean', 'dr','wdr','dr_sepbags')
-ggplot(mses[model %in% model_subset], aes(x = n_bags,y = mse, color = model)) + 
-  facet_grid(~party, scales = 'free_y') +
-  geom_point(alpha = 0.2) +
-  geom_smooth() + 
-  ggtitle("Holdout MSE by number of bags")
-
-ggplot(holdout_error[model %in% model_subset], aes(x = n_bags,y = error_dem, color = model)) + 
-  geom_point(alpha = 0.2) +
-  geom_smooth(se = F) + 
-  facet_wrap(~party, scales = 'free_y') +
-  ggtitle("Holdout Dem bias by number of bags")
-
+```{r plot-nbags-mse, fig.height=2, fig.width=4}
+plot_mse(mses[model %in% model_subset], x = 'n_bags', x_lab = 'number of bags')
 ```
+
+```{r plot-nbags-bias, fig.with = 9, fig.height = 3}
+plot_bias(holdout_error[model %in% model_subset], x = 'n_bags', x_lab = 'number of bags')
+```
+
 
 ## bags with just unmatched data
 
 Fitting bags using just the unmatched data seems to improve model performance slightly for some numbers of bags  (~80).
 
-```{r}
-ggplot(mses[model %in% c('dr_sepbags', 'wdr_sepbags')], aes(x = n_bags,y = mse, color = refit_bags)) + 
-  geom_point(alpha = 0.2) +
-  geom_smooth() + 
-  facet_grid(party~model, scales = 'free') +
-  ggtitle("Holdout MSE by number of bags")
+```{r plot-avgbagsize-mse, fig.width=4, fig.height = 3}
+mses[, avg_obs_per_bag := (match_rate * 2000)/n_bags]
 
-ggplot(holdout_error[model %in% c('dr_sepbags', 'wdr_sepbags')], aes(x = n_bags,y = error_dem, color = refit_bags)) + 
+ggplot(mses[model %in% c('dr_sepbags', 'wdr_sepbags')], 
+       aes(x = avg_obs_per_bag,y = mse, color = refit_bags)) + 
   geom_point(alpha = 0.2) +
   geom_smooth() + 
-  facet_grid(party~model, scales = 'free') +
-  ggtitle("Holdout Dem bias by number of bags")
+  facet_grid(party~model, scales = 'free_y') +
+  ggtitle("Holdout MSE by avg number of observations per bag") +
+  theme_light()+
+  theme(legend.title=element_text(size=10), legend.position="bottom") +
+  xlab("Avg number of observations per bag") +
+  scale_color_discrete(name = "Separate bags for matched data")
 
 ```
 
 
+```{r plot-avgbagsize-bias, fig.width=4, fig.height = 3}
+holdout_error[, avg_obs_per_bag := (match_rate * 2000)/n_bags]
+ggplot(holdout_error[model %in% c('dr_sepbags', 'wdr_sepbags')], 
+       aes(x = avg_obs_per_bag,y = error_dem, color = refit_bags)) + 
+  geom_hline(yintercept = 0, color = 'red', lty = 2) +
+  geom_point(alpha = 0.2) +
+  geom_smooth() + 
+  facet_grid(party~model, scales = 'free') +
+  ggtitle("Holdout Dem bias by avg number of observations per bag") +
+  xlab("Avg number of observations per bag") +
+  theme_light()+
+  theme(legend.position='bottom')
+```
+
+
+
+
 ## Optimal N Landmarks
 
-- Definitive improvement in MSE and bias for larger numbers of landmarks up to 200.  Inconclusive for numbers larger than 200 due to sparsity of simulations.  Need to run more to examine this.
-- Even at 200 landmarks, simple logistic regression with matched data outperforms any DR model
-
 ```{r}
-model_subset = c('logit', 'grpmean', 'dr','wdr','dr_sepbags')
-ggplot(mses[model %in% model_subset], aes(x = n_landmarks,y = mse_relall, color = model)) + 
+model_subset = c('logit_alldata','logit', 'grpmean', 'dr','wdr','dr_sepbags')
+ggplot(mses[model %in% model_subset], aes(x = n_landmarks,y = mse, color = model)) + 
   geom_point(alpha = 0.2) +
   geom_smooth() + 
   facet_wrap(~party, scales = 'free') +
   ggtitle("Holdout MSE by match rate")
 
 ggplot(holdout_error[model %in% model_subset], aes(x = n_landmarks,y = error_dem, color = model)) + 
-  geom_point(alpha = 0.2) +
+  geom_hline(yintercept = 0, color = 'red') +
+  geom_point(, alpha = 0.2) +
   geom_smooth(se = F) + 
-  facet_wrap(~party, scales = 'free') +
+  facet_grid(party~model, scales = 'free') +
   ggtitle("Holdout Dem bias by number of landmarks")
 
 ```
@@ -302,19 +329,3 @@ ggplot(mses[model %in% c('dr','wdr','dr_sepbags') & party == 'insurvey'], aes(x 
   facet_wrap(~model, scales = 'free') +
   ggtitle("Holdout Dem bias by number of landmarks")
 ```
-
-# conclusions
-
-At this stage, it appears that DR is not an improvement on simple logistic regression with the subset of matched respondents with this data set.  
-
-Party is incredibly predictive of outcome, so how we treat it has an enormous impact on model performance and conclusions from this simulation.  This level of predictiveness is not realistic in most settings, however, because in this case party ID is collected at the same time as support, and therefor contains almost the same information as the outcome. We don't generally have voterfile data with *that* level of predictiveness.
-
-
-## next steps
-
-- more sims with more landmarks
-- **more data**, both N and richness of covariate data (incl. spatial data)
-- custom kernel that separates out/gives more weight to party?
-- improve weighting settings since that does seem to somewhat help with bias
-
-
