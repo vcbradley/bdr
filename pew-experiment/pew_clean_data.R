@@ -55,7 +55,7 @@ data_recoded[, p_matched :=
                -2 * as.numeric(demo_mode == 'landline') 
              +  as.numeric(demo_phonetype == '01-Both') 
              - 3 * as.numeric(demo_race == 'W')
-             + -2 * as.numeric(demo_reg == '03-No')
+             -2 * as.numeric(demo_reg == '03-No')
              + -1 * as.numeric(demo_hhsize == 2)
              + -2 * as.numeric(demo_hhsize == 3)
              + 2 *age_scaled^2
