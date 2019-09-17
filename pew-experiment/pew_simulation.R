@@ -60,9 +60,10 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
   
   # # randomly choose settings
   run_settings$party = sample(c('insurvey', 'onfile'), size = 1)
-  run_settings$refit_bags = sample(c(T, F), prob = c(0.4, 0.6), size = 1)
+  #run_settings$refit_bags = sample(c(T, F), prob = c(0.4, 0.6), size = 1)
+  run_settings$refit_bags = sample(c(T, F), size = 1)
   #run_settings$match_rate = runif(min = 0.01, max = 1, n = 1)
-  run_settings$match_rate = rbeta(1, 3, n = 1)
+  run_settings$match_rate = rbeta(1, 2, n = 1)
   #run_settings$n_bags = round(runif(min = 40, max = 150, n = 1))
   run_settings$n_bags = round(runif(min = 40, max = 200, n = 1))
   #run_settings$n_landmarks = round(exp(rnorm(mean = 4.7, sd = 0.6, n = 1)))
