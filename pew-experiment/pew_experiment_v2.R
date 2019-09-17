@@ -16,7 +16,7 @@ pew_data = fread('data/data_recoded.csv')
 
 run_settings = list(party = 'insurvey'   #'onfile' or 'insurvey'
                     , n_surveyed = 2000
-                    , match_rate = .1
+                    , match_rate = .5
                     , n_bags = 75
                     , n_landmarks = 200
                     , refit_bags = F)
@@ -145,7 +145,7 @@ bags_unm$bags_newdata[pew_data$matched == 1] <- seq(n_bags + 1, length = sum(pew
 #### SET PARAMETERS ####
 dist_reg_params = list(sigma = 0.16 #from quick CV
                        , bags = bags
-                       , landmarks = landmarks
+                       #, landmarks = landmarks
                        , make_bags_vars = vars$file_and_survey
                        , score_bags_vars = vars$file_and_survey
                        , regression_vars = regression_vars
@@ -168,6 +168,8 @@ lasso_fit = fitLasso(mu_hat = X_lasso[which(pew_data$matched == 1), ]
                      , phi_x = X_lasso
                      , family = 'multinomial'
 )
+coef(lasso_fit$fit, s = 'lambda.min')
+
 setnames(lasso_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
 
 # lasso_fit = cv.glmnet(x = X_lasso[which(pew_data$matched == 1), ]
