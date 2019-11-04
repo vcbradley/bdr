@@ -16,6 +16,7 @@ tryN = function(expr, max_attempts = 5){
 
 runModels = function(data, dist_reg_params, max_attempts = 5){
   
+  
   #-----------------------------------------
   ## Run models
   results = list()
@@ -65,7 +66,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting DR - Linear\t")
     dist_reg_params$kernel_type = 'linear'
     dist_reg_params$weight_col = NULL
-    dist_reg_params$bags = bags
+    dist_reg_params$which_bag = 'bag'
     
     fit_dr_linear = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_dr_linear$mse_test, '\n')
@@ -77,7 +78,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting DR - RBF\t")
     dist_reg_params$kernel_type = 'rbf'
     dist_reg_params$weight_col = NULL
-    dist_reg_params$bags = bags
+    dist_reg_params$which_bag = 'bag'
     
     fit_dr = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_dr$mse_test, '\n')
@@ -89,7 +90,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting DR - Custom\t")
     dist_reg_params$kernel_type = 'rbf_age'
     dist_reg_params$weight_col = NULL
-    dist_reg_params$bags = bags
+    dist_reg_params$which_bag = 'bag'
     
     fit_dr_cust = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_dr_cust$mse_test, '\n')
@@ -103,7 +104,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     
     dist_reg_params$kernel_type = 'linear'
     dist_reg_params$weight_col = 'kmm_weight'
-    dist_reg_params$bags = bags
+    dist_reg_params$which_bag = 'bag'
     
     fit_wdr_linear = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_wdr_linear$mse_test, '\n')
@@ -115,7 +116,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting WDR - RBF\t")
     dist_reg_params$kernel_type = 'rbf'
     dist_reg_params$weight_col = 'kmm_weight'
-    dist_reg_params$bags = bags
+    dist_reg_params$which_bag = 'bag'
     
     fit_wdr = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_wdr$mse_test, '\n')
@@ -128,7 +129,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting SEP DR - RBF\t")
     dist_reg_params$kernel_type = 'rbf'
     dist_reg_params$weight_col = NULL
-    dist_reg_params$bags = bags_unm
+    dist_reg_params$which_bag = 'bag_sep'
     
     # fit model with sigma
     fit_dr_sepbags = tryN(doBasicDR(data = data, dist_reg_params))
@@ -142,7 +143,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting SEP WDR - RBF\t")
     dist_reg_params$kernel_type = 'rbf'
     dist_reg_params$weight_col = 'kmm_weight'
-    dist_reg_params$bags = bags_unm
+    dist_reg_params$which_bag = 'bag_sep'
     
     fit_wdr_sepbags = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_wdr_sepbags$mse_test, '\n')
@@ -154,7 +155,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting SEP DR - Linear\t")
     dist_reg_params$kernel_type = 'linear'
     dist_reg_params$weight_col = NULL
-    dist_reg_params$bags = bags_unm
+    dist_reg_params$which_bag = 'bag_sep'
     
     fit_dr_sepbags_lin = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_dr_sepbags_lin$mse_test, '\n')
@@ -167,7 +168,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     cat("\tFitting SEP DR - Custom\t")
     dist_reg_params$kernel_type = 'rbf_age'
     dist_reg_params$weight_col = NULL
-    dist_reg_params$bags = bags_unm
+    dist_reg_params$which_bag = 'bag_sep'
     
     fit_dr_sepbags_cust = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_dr_sepbags_cust$mse_test, '\n')
@@ -178,15 +179,15 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
   #------------------------------------------------------------------------
   ###### calculate group means - re-run after running DR because bags will be re-fit
   cat("\tGroup means\t")
-  data[, bag := bags$bags_newdata]
   Y_grp_means = data[surveyed == 1, lapply(.SD, mean), .SDcols = dist_reg_params$outcome, by = bag]
   setnames(Y_grp_means, c('bag',gsub('_','_hat_',dist_reg_params$outcome)))
   
   Y_grp_means = merge(data[, .(bag)], Y_grp_means, by = 'bag', all.x = T)
   
-  Y_grp_means[is.na(y_hat_dem), y_hat_dem := 0]
-  Y_grp_means[is.na(y_hat_rep), y_hat_rep := 0]
-  Y_grp_means[is.na(y_hat_oth), y_hat_oth := 0]
+  Y_grp_means[is.na(Y_grp_means)] <- 0
+  # Y_grp_means[is.na(y_hat_dem), y_hat_dem := 0]
+  # Y_grp_means[is.na(y_hat_rep), y_hat_rep := 0]
+  # Y_grp_means[is.na(y_hat_oth), y_hat_oth := 0]
   
   # add to results
   results[['grpmean']] = Y_grp_means[, -1]
