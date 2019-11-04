@@ -14,7 +14,6 @@ tryN = function(expr, max_attempts = 5){
 
 
 
-
 runModels = function(data, dist_reg_params, max_attempts = 5){
   
   #-----------------------------------------
@@ -42,146 +41,159 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
   ## Run models
   results = list()
   
-  ## Basic LASSO
-  cat("\tFitting LOGIT\t")
   lasso_frmla = as.formula(paste0("~", paste(dist_reg_params$regression_vars, collapse = '+')))
   X_lasso = modmat_all_levs(data, formula = lasso_frmla)
   
-  lasso_fit = tryN(fitLasso(mu_hat = X_lasso[which(data$matched == 1), ]
-                            , Y_bag = as.matrix(data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
-                            , phi_x = X_lasso
-                            , family = 'multinomial'
-  ))
-  
-  setnames(lasso_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
-  
-  # cat(calcMSE(Y = as.numeric(unlist(data[holdout == 1, dist_reg_params$outcome, with = F]))
-  #         , as.numeric(unlist(lasso_fit$Y_hat[data$holdout == 1,]))), '\n')
-  
-  results[['logit']] = lasso_fit$Y_hat
-  
-  
-  
   ## LASSO - ALL DATA
-  cat("\tFitting LASSO - ALL DATA\t")
-  lasso_alldata_fit = tryN(fitLasso(mu_hat = X_lasso
-                                    , Y_bag = as.matrix(data[, .SD, .SDcols = dist_reg_params$outcome])
-                                    , phi_x = X_lasso
-                                    , family = 'multinomial'
-  ))
-  setnames(lasso_alldata_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+  if(is.null(dist_reg_params$model_list) | 'logit_alldata' %in% dist_reg_params$model_list){
+    cat("\tFitting LASSO - ALL DATA\t")
+    lasso_alldata_fit = tryN(fitLasso(mu_hat = X_lasso
+                                      , Y_bag = as.matrix(data[, .SD, .SDcols = dist_reg_params$outcome])
+                                      , phi_x = X_lasso
+                                      , family = 'multinomial'
+    ))
+    setnames(lasso_alldata_fit$Y_hat, gsub('y_','y_hat_',dist_reg_params$outcome))
+    
+    # cat(calcMSE(Y = as.numeric(unlist(data[holdout == 1, dist_reg_params$outcome, with = F]))
+    #         , as.numeric(unlist(lasso_alldata_fit$Y_hat[data$holdout == 1,]))), '\n')
+    
+    results[['logit_alldata']] = lasso_alldata_fit$Y_hat
+    
+  }
   
-  # cat(calcMSE(Y = as.numeric(unlist(data[holdout == 1, dist_reg_params$outcome, with = F]))
-  #         , as.numeric(unlist(lasso_alldata_fit$Y_hat[data$holdout == 1,]))), '\n')
   
-  results[['logit_alldata']] = lasso_alldata_fit$Y_hat
+  ## Basic LASSO
+  if(is.null(dist_reg_params$model_list) | 'logit' %in% dist_reg_params$model_list){
+    cat("\tFitting LOGIT\t")
+    
+    lasso_fit = tryN(fitLasso(mu_hat = X_lasso[which(data$matched == 1), ]
+                              , Y_bag = as.matrix(data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                              , phi_x = X_lasso
+                              , family = 'multinomial'
+    ))
+    
+    setnames(lasso_fit$Y_hat, gsub('y_','y_hat_',dist_reg_params$outcome))
+    
+    # cat(calcMSE(Y = as.numeric(unlist(data[holdout == 1, dist_reg_params$outcome, with = F]))
+    #         , as.numeric(unlist(lasso_fit$Y_hat[data$holdout == 1,]))), '\n')
+    
+    results[['logit']] = lasso_fit$Y_hat
+  }
   
   
   ### fit DR -- Linear
-  cat("\tFitting DR - Linear\t")
-  dist_reg_params$kernel_type = 'linear'
-  dist_reg_params$weight_col = NULL
-  dist_reg_params$bags = bags
+  if(is.null(dist_reg_params$model_list) | 'dr_linear' %in% dist_reg_params$model_list){
+    cat("\tFitting DR - Linear\t")
+    dist_reg_params$kernel_type = 'linear'
+    dist_reg_params$weight_col = NULL
+    dist_reg_params$bags = bags
+    
+    fit_dr_linear = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_dr_linear$mse_test, '\n')
+    results[['dr_linear']] = fit_dr_linear$y_hat
+  }
   
-  fit_dr_linear = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_dr_linear$mse_test, '\n')
-  results[['dr_linear']] = fit_dr_linear$y_hat
+  ### fit DR - NO WEIGHTING
+  if(is.null(dist_reg_params$model_list) | 'dr' %in% dist_reg_params$model_list){
+    cat("\tFitting DR - RBF\t")
+    dist_reg_params$kernel_type = 'rbf'
+    dist_reg_params$weight_col = NULL
+    dist_reg_params$bags = bags
+    
+    fit_dr = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_dr$mse_test, '\n')
+    results[['dr']] = fit_dr$y_hat
+  }
   
+  ### fit DR - NO WEIGHTING -- CUSTOM KERNEL
+  if(is.null(dist_reg_params$model_list) | 'dr_cust' %in% dist_reg_params$model_list){
+    cat("\tFitting DR - Custom\t")
+    dist_reg_params$kernel_type = 'rbf_age'
+    dist_reg_params$weight_col = NULL
+    dist_reg_params$bags = bags
+    
+    fit_dr_cust = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_dr_cust$mse_test, '\n')
+    results[['dr_cust']] = fit_dr_cust$y_hat
+  }
   
   
   ### fit DR -- weighted & Linear
-  cat("\tFitting WDR - Linear\t")
-  dist_reg_params$kernel_type = 'linear'
-  dist_reg_params$weight_col = 'kmm_weight'
-  dist_reg_params$bags = bags
-  
-  fit_wdr_linear = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_wdr_linear$mse_test, '\n')
-  results[['wdr_linear']] = fit_wdr_linear$y_hat
-  
-  
-  
-  ### fit DR - NO WEIGHTING
-  cat("\tFitting DR - RBF\t")
-  dist_reg_params$kernel_type = 'rbf'
-  dist_reg_params$weight_col = NULL
-  dist_reg_params$bags = bags
-  
-  fit_dr = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_dr$mse_test, '\n')
-  results[['dr']] = fit_dr$y_hat
-  
-  
+  if(is.null(dist_reg_params$model_list) | 'wdr_linear' %in% dist_reg_params$model_list){
+    cat("\tFitting WDR - Linear\t")
+    
+    dist_reg_params$kernel_type = 'linear'
+    dist_reg_params$weight_col = 'kmm_weight'
+    dist_reg_params$bags = bags
+    
+    fit_wdr_linear = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_wdr_linear$mse_test, '\n')
+    results[['wdr_linear']] = fit_wdr_linear$y_hat
+  }
   
   ### fit DR -- WEIGHTED
-  cat("\tFitting WDR - RBF\t")
-  dist_reg_params$kernel_type = 'rbf'
-  dist_reg_params$weight_col = 'kmm_weight'
-  dist_reg_params$bags = bags
-  
-  fit_wdr = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_wdr$mse_test, '\n')
-  results[['wdr']] = fit_wdr$y_hat
-  
-  
-  ### fit DR - NO WEIGHTING -- CUSTOM KERNEL
-  cat("\tFitting DR - Custom\t")
-  dist_reg_params$kernel_type = 'rbf_age'
-  dist_reg_params$weight_col = NULL
-  dist_reg_params$bags = bags
-  
-  fit_dr_cust = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_dr_cust$mse_test, '\n')
-  results[['dr_cust']] = fit_dr_cust$y_hat
-  
+  if(is.null(dist_reg_params$model_list) | 'wdr' %in% dist_reg_params$model_list){
+    cat("\tFitting WDR - RBF\t")
+    dist_reg_params$kernel_type = 'rbf'
+    dist_reg_params$weight_col = 'kmm_weight'
+    dist_reg_params$bags = bags
+    
+    fit_wdr = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_wdr$mse_test, '\n')
+    results[['wdr']] = fit_wdr$y_hat
+  }
   
   
   ### fit DR - SEP BAGS
-  cat("\tFitting SEP DR - RBF\t")
-  dist_reg_params$kernel_type = 'rbf'
-  dist_reg_params$weight_col = NULL
-  dist_reg_params$bags = bags_unm
-  
-  
-  # fit model with sigma
-  fit_dr_sepbags = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_dr_sepbags$mse_test, '\n')
-  results[['dr_sepbags']] = fit_dr_sepbags$y_hat
-  
+  if(is.null(dist_reg_params$model_list) | 'dr_sepbags' %in% dist_reg_params$model_list){
+    cat("\tFitting SEP DR - RBF\t")
+    dist_reg_params$kernel_type = 'rbf'
+    dist_reg_params$weight_col = NULL
+    dist_reg_params$bags = bags_unm
+    
+    # fit model with sigma
+    fit_dr_sepbags = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_dr_sepbags$mse_test, '\n')
+    results[['dr_sepbags']] = fit_dr_sepbags$y_hat
+  }
   
   
   ### fit DR - SEP BAGS - WEIGHTED
-  cat("\tFitting SEP WDR - RBF\t")
-  dist_reg_params$kernel_type = 'rbf'
-  dist_reg_params$weight_col = 'kmm_weight'
-  dist_reg_params$bags = bags_unm
-  
-  fit_wdr_sepbags = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_wdr_sepbags$mse_test, '\n')
-  results[['wdr_sepbags']] = fit_wdr_sepbags$y_hat
-  
-  
+  if(is.null(dist_reg_params$model_list) | 'wdr_sepbags' %in% dist_reg_params$model_list){
+    cat("\tFitting SEP WDR - RBF\t")
+    dist_reg_params$kernel_type = 'rbf'
+    dist_reg_params$weight_col = 'kmm_weight'
+    dist_reg_params$bags = bags_unm
+    
+    fit_wdr_sepbags = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_wdr_sepbags$mse_test, '\n')
+    results[['wdr_sepbags']] = fit_wdr_sepbags$y_hat
+  }
   
   ### fit DR - SEP BAGS - LINEAR
-  cat("\tFitting SEP DR - Linear\t")
-  dist_reg_params$kernel_type = 'linear'
-  dist_reg_params$weight_col = NULL
-  dist_reg_params$bags = bags_unm
-  
-  fit_dr_sepbags_lin = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_dr_sepbags_lin$mse_test, '\n')
-  results[['dr_sepbags_lin']] = fit_dr_sepbags_lin$y_hat
+  if(is.null(dist_reg_params$model_list) | 'dr_sepbags_lin' %in% dist_reg_params$model_list){
+    cat("\tFitting SEP DR - Linear\t")
+    dist_reg_params$kernel_type = 'linear'
+    dist_reg_params$weight_col = NULL
+    dist_reg_params$bags = bags_unm
+    
+    fit_dr_sepbags_lin = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_dr_sepbags_lin$mse_test, '\n')
+    results[['dr_sepbags_lin']] = fit_dr_sepbags_lin$y_hat
+  }
   
   
   ### fit DR - SEP BAGS - CUSTOM KERNEL
-  cat("\tFitting SEP DR - Custom\t")
-  dist_reg_params$kernel_type = 'rbf_age'
-  dist_reg_params$weight_col = NULL
-  dist_reg_params$bags = bags_unm
-  
-  fit_dr_sepbags_cust = tryN(doBasicDR(data = data, dist_reg_params))
-  #cat(fit_dr_sepbags_cust$mse_test, '\n')
-  results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
+  if(is.null(dist_reg_params$model_list) | 'dr_sepbags_cust' %in% dist_reg_params$model_list){
+    cat("\tFitting SEP DR - Custom\t")
+    dist_reg_params$kernel_type = 'rbf_age'
+    dist_reg_params$weight_col = NULL
+    dist_reg_params$bags = bags_unm
+    
+    fit_dr_sepbags_cust = tryN(doBasicDR(data = data, dist_reg_params))
+    #cat(fit_dr_sepbags_cust$mse_test, '\n')
+    results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
+  }
   
   
   #------------------------------------------------------------------------
