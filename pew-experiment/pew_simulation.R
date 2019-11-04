@@ -61,7 +61,7 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
   # # randomly choose settings
   run_settings$party = sample(c('insurvey', 'onfile'), size = 1)
   #run_settings$refit_bags = sample(c(T, F), prob = c(0.4, 0.6), size = 1)
-  run_settings$refit_bags = sample(c(T, F), size = 1)
+  #run_settings$refit_bags = sample(c(T, F), size = 1)
   #run_settings$match_rate = runif(min = 0.01, max = 1, n = 1)
   run_settings$match_rate = rbeta(1, 2, n = 1)
   #run_settings$n_bags = round(runif(min = 40, max = 150, n = 1))
@@ -159,7 +159,7 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
   #-----------------------------------------
   #### SET PARAMETERS ####
   dist_reg_params = list(sigma = 'median' # use median heuristic
-                         #, bags = bags  #moveing to withiin the runModel code
+                         #, bags = bags  #moving to withiin the runModel code
                          , refit_bags = run_settings$refit_bags
                          , landmarks = landmarks
                          , make_bags_vars = vars$file_and_survey
@@ -178,23 +178,27 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
   #-----------------------------------------
   ## fix bags
   cat("\tGetting bags\n")
-  
   bags = getBags(data = data[surveyed == 1,]
                  , vars = vars$file_and_survey
                  , n_bags = dist_reg_params$n_bags
                  , newdata = data[, vars$file_and_survey, with = F])
   
-  # if we're refitting bags, create new bag just using the unmatched survey data
-  if(dist_reg_params$refit_bags){
-    bags_unm = getBags(data = data[unmatched == 1,]
-                       , vars = vars$file_and_survey
-                       , n_bags = dist_reg_params$n_bags
-                       , newdata = data[, vars$file_and_survey, with = F])
-  }else{
-    bags_unm = bags
-  }
+  # # if we're refitting bags, create new bag just using the unmatched survey data
+  # if(dist_reg_params$refit_bags){
+  #   bags_unm = getBags(data = data[unmatched == 1,]
+  #                      , vars = vars$file_and_survey
+  #                      , n_bags = dist_reg_params$n_bags
+  #                      , newdata = data[, vars$file_and_survey, with = F])
+  # }else{
+  #   bags_unm = bags
+  # }
+  
+  # set bags
+  pew_data[, bag := bags$bags_newdata]
+  
   # give each matched data point its own bag
-  bags_unm$bags_newdata[data$matched == 1] <- seq(dist_reg_params$n_bags + 1, length = sum(data$matched))
+  pew_data[, bag_sep := bag]
+  pew_data[matched == 1, bag_sep := seq(dist_reg_params$n_bags + 1, length = sum(pew_data$matched))]
   
   
   #--------------------------------------------------
