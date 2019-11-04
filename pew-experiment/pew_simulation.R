@@ -175,6 +175,28 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
                          , weight_col = NULL)
   
   
+  #-----------------------------------------
+  ## fix bags
+  cat("\tGetting bags\n")
+  
+  bags = getBags(data = data[surveyed == 1,]
+                 , vars = vars$file_and_survey
+                 , n_bags = dist_reg_params$n_bags
+                 , newdata = data[, vars$file_and_survey, with = F])
+  
+  # if we're refitting bags, create new bag just using the unmatched survey data
+  if(dist_reg_params$refit_bags){
+    bags_unm = getBags(data = data[unmatched == 1,]
+                       , vars = vars$file_and_survey
+                       , n_bags = dist_reg_params$n_bags
+                       , newdata = data[, vars$file_and_survey, with = F])
+  }else{
+    bags_unm = bags
+  }
+  # give each matched data point its own bag
+  bags_unm$bags_newdata[data$matched == 1] <- seq(dist_reg_params$n_bags + 1, length = sum(data$matched))
+  
+  
   #--------------------------------------------------
   # RUN MODELS
   results_temp = runModels(data = pew_data, dist_reg_params, max_attempts = 5)

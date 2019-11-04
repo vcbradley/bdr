@@ -17,27 +17,6 @@ tryN = function(expr, max_attempts = 5){
 runModels = function(data, dist_reg_params, max_attempts = 5){
   
   #-----------------------------------------
-  ## fix bags
-  cat("\tGetting bags\n")
-  
-  bags = getBags(data = data[surveyed == 1,]
-                 , vars = vars$file_and_survey
-                 , n_bags = dist_reg_params$n_bags
-                 , newdata = data[, vars$file_and_survey, with = F])
-  
-  # if we're refitting bags, create new bag just using the unmatched survey data
-  if(dist_reg_params$refit_bags){
-    bags_unm = getBags(data = data[unmatched == 1,]
-                       , vars = vars$file_and_survey
-                       , n_bags = dist_reg_params$n_bags
-                       , newdata = data[, vars$file_and_survey, with = F])
-  }else{
-    bags_unm = bags
-  }
-  # give each matched data point its own bag
-  bags_unm$bags_newdata[data$matched == 1] <- seq(dist_reg_params$n_bags + 1, length = sum(data$matched))
-  
-  #-----------------------------------------
   ## Run models
   results = list()
   
@@ -50,7 +29,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     lasso_alldata_fit = tryN(fitLasso(mu_hat = X_lasso
                                       , Y_bag = as.matrix(data[, .SD, .SDcols = dist_reg_params$outcome])
                                       , phi_x = X_lasso
-                                      , family = 'multinomial'
+                                      , family = dist_reg_params$outcome_family
     ))
     setnames(lasso_alldata_fit$Y_hat, gsub('y_','y_hat_',dist_reg_params$outcome))
     
@@ -69,7 +48,7 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     lasso_fit = tryN(fitLasso(mu_hat = X_lasso[which(data$matched == 1), ]
                               , Y_bag = as.matrix(data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
                               , phi_x = X_lasso
-                              , family = 'multinomial'
+                              , family = dist_reg_params$outcome_family
     ))
     
     setnames(lasso_fit$Y_hat, gsub('y_','y_hat_',dist_reg_params$outcome))
