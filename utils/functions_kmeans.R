@@ -55,6 +55,7 @@ kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10,
     tmp.out <- kmeans(data, centers = data[center_ids, ], 
                       iter.max = iter.max, ...)
     tmp.out$inicial.centers <- data[center_ids, ]
+    tmp.out$center_ids <- center_ids
     if (tmp.out$tot.withinss < out$tot.withinss) {
       out <- tmp.out
     }
