@@ -7,47 +7,38 @@ kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10,
   kk <- k
   if (length(dim(data)) == 0) {
     data <- matrix(data, ncol = 1)
-  }
-  else {
+  }else {
     data <- cbind(data)
   }
   num.samples <- nrow(data)
   ndim <- ncol(data)
-  data.avg <- colMeans(data)
-  data.cov <- cov(data)
   out <- list()
   out$tot.withinss <- Inf
   for (restart in seq_len(nstart)) {
     center_ids <- rep(0, length = kk)
     if (start == "random") {
       center_ids[1:2] = sample.int(num.samples, 1)
-    }
-    else if (start == "normal") {
+    } else if (start == "normal") {
+      data.avg <- colMeans(data)
+      data.cov <- cov(data)
       center_ids[1:2] = which.min(dmvnorm(data, mean = data.avg, 
                                           sigma = data.cov))
-    }
-    else {
+    } else {
       center_ids[1:2] = start
     }
+    # calc first dist
+    dists <- dista(x = data, xnew = matrix(data[center_ids[1], ], nrow = 1, ncol = ncol(data)), square = TRUE)
+    
     for (ii in 2:kk) {
-      dists <- dista(x = data, xnew = data[center_ids, ], square = TRUE)
       probs <- apply(dists, 2, min)
-      # if (ndim == 1) {
-      #   dists <- apply(cbind(data[center_ids, ]), 1, 
-      #                  function(center) {
-      #                    
-      #                    colSums(apply(data, 1, function(x) (x - center)^2))  #line changed to correctly calc distance
-      #                  })
-      # }
-      # else {
-      #   dists <- apply(data[center_ids, ], 1, function(center) {
-      #     colSums(apply(data, 1, function(x) (x - center)^2))  #line changed to correctly calc distance
-      #   })
-      # }
-      # probs <- apply(dists, 1, min)
+      
       probs[center_ids] <- 0
       #center_ids[ii] <- sample.int(num.samples, 1, prob = probs)
       center_ids[ii] <- sample(c(1:num.samples)[probs > 0], prob = probs[probs > 0], size = 1)
+      
+      # calc new dists
+      dists_new <- dista(x = data, xnew = matrix(data[center_ids[ii], ], nrow = 1, ncol = ncol(data)), square = TRUE)
+      dists = rbind(dists, dists_new)
     }
     #cat(paste('n unique: ', nrow(unique(data[center_ids, ]))))
     #cat('\n')
