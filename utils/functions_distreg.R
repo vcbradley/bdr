@@ -70,9 +70,9 @@ getLandmarks = function(data, vars, n_landmarks, subset_ind = NULL){
   
   # get group definitions with k-means
   landmarks = suppressWarnings(kmeanspp(data = X[subset_ind, ], k = n_landmarks, iter.max = 1))
-  landmarks = as.matrix(landmarks$inicial.centers)
+  landmarks$inicial.centers = as.matrix(landmarks$inicial.centers)
 
-  return(list(landmarks = landmarks, X = X))
+  return(list(landmarks = landmarks$inicial.centers, X = X, center_ids = landmarks$center_ids))
 }
 
 
@@ -109,26 +109,34 @@ fitLasso = function(mu_hat, Y_bag, phi_x = NULL, nfolds = 10, family = 'gaussian
   nfolds = min(3, nfolds)
   
   if('data.table' %in% class(mu_hat)){
-    mu_hat_mat = as.matrix(mu_hat[, -1, with = F]) # drop bags col
+    mu_hat_mat = as.matrix(mu_hat[, bags := NULL]) # drop bags col
   }else{
     mu_hat_mat = mu_hat
   }
   
   fit_lambda = cv.glmnet(x = mu_hat_mat, y = Y_bag, nfolds = nfolds, family = family, alpha = alpha)
-  if(family == 'gaussian'){
-    nonzero_ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)  # drop intercept term
+  coefs = coef(fit_lambda, s = 'lambda.min')
+  if('list' %in% class(coefs)){
+    nonzero_coefs = unique(unlist(lapply(coefs, function(c) rownames(c)[which(c != 0)])))
   }else{
-    nonzero_ind = sort(unique(unlist(lapply(coef(fit_lambda, s = 'lambda.min'), function(c){
-      which(c[-c(1:(ncol(Y_bag) - 1))] != 0) #n-1 intercepts, where n is number of outcome categories
-    }))))
+   nonzero_coefs = rownames(coefs)[which(coefs != 0)] 
   }
-  # always include the intercept
-  nonzero_ind = c(1, nonzero_ind + 1)
+  nonzero_ind = which(colnames(mu_hat_mat) %in% nonzero_coefs)
+  # if(family == 'multinomial'){
+  #   nonzero_ind = sort(unique(unlist(lapply(coef(fit_lambda, s = 'lambda.min'), function(c){
+  #     which(c[-c(1:(ncol(Y_bag) - 1))] != 0) #n-1 intercepts, where n is number of outcome categories
+  #   }))))
+  # }else{
+  #   nonzero_ind = which(coef(fit_lambda, s = 'lambda.min')[-1] != 0)  # drop intercept term
+  # }
+  # # always include the intercept
+  # nonzero_ind = c(1, nonzero_ind + 1)
   
   # use all vars again if we didn't find any sig ones the first time
   if(length(nonzero_ind) == 0){
     nonzero_ind = 1:ncol(mu_hat_mat)
   }
+  nonzero_ind = unique(c(1, nonzero_ind)) #always include intercept
 
   # refit to avoid shrinkage - this led to much higher MSEs in holdout set! So switcheing back to cv.glmnet
   #fit = glmnet(as.matrix(mu_hat_mat[, nonzero_ind]), y = Y_bag, lambda = 0, family = family, alpha = alpha)
@@ -172,26 +180,11 @@ doBasicDR = function(data, params){
     data[, weight := get(params$weight_col)]
   }
   
-  if(is.null(params$score_bags_vars)){
-    params$score_bags_vars = params$make_bags_vars
-  }
+  # if(is.null(params$score_bags_vars)){
+  #   params$score_bags_vars = params$make_bags_vars
+  # }
   
-  data[, bag := NULL]
-  
-  # Make bags
-  if(is.null(params$bags)){
-    cat(paste0(Sys.time(), "\t Making bags\n"))
-    bags = getBags(data = data[get(params$bagging_ind) == 1,]
-                   , vars = params$make_bags_vars
-                   , n_bags = params$n_bags
-                   , newdata = data[, params$score_bags_vars, with = F])
-  }else{
-    bags = params$bags
-    n_bags = length(unique(bags$bags_newdata))
-  }
-  
-  # assign data to bags
-  data[, bag := bags$bags_newdata]
+  n_bags = max(data[, get(params$which_bag)])
   
   # Get landmarks
   if(is.null(params$landmarks)){
@@ -205,15 +198,15 @@ doBasicDR = function(data, params){
   }
   
   # make kernel parameters
-  kernel_params = getKernParams(X = landmarks$X, kernel_type = params$kernel_type, sigma = params$sigma)
+  kernel_params = getKernParams(X = params$landmarks$X, kernel_type = params$kernel_type, sigma = params$sigma)
   #print(kernel_params)
   
   # get features
   cat(paste0(Sys.time(), "\t Making features\n"))
-  features = getFeatures(data = landmarks$X
-                         , bag = as.numeric(data[, bag])
+  features = getFeatures(data = params$landmarks$X
+                         , bag = as.numeric(data[, get(params$which_bag)])
                          , train_ind = as.numeric(data[, get(params$train_ind)])
-                         , landmarks = landmarks$landmarks
+                         , landmarks = params$landmarks$landmarks
                          , kernel_params = kernel_params
                          , weight = as.numeric(data[, weight]))
   
@@ -221,11 +214,11 @@ doBasicDR = function(data, params){
   # prep outcome
   # if weighting col is specified, then use that to get weighted mean
   if(params$outcome_family == 'multinomial'){
-    Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = params$outcome, by = bag][order(bag)]
-    #Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = params$outcome, by = bag][order(bag)]
+    Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, weighted.mean, w = weight), .SDcols = params$outcome, by = .(bag = get(params$which_bag))][order(bag)]
+    #Y_svy_bag = data[get(params$bagging_ind) == 1, lapply(.SD, function(s) sum(s * weight)), .SDcols = params$outcome, .(bag = get(params$which_bag))][order(bag)]
   }else{
-    Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = weigted.mean(get(params$outcome), w = weight)), bag][order(bag)]
-    #Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = sum(weight)), bag][order(bag)]
+    Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = weighted.mean(get(params$outcome), w = weight)), .(bag = get(params$which_bag))][order(bag)]
+    #Y_svy_bag = data[get(params$bagging_ind) == 1, .(y_mean = sum(weight)), .(bag = get(params$which_bag))][order(bag)]
   }
   # weights might be negative and prodce negative estimates of Y, so floor at 0
   Y_svy_bag[Y_svy_bag < 0] <- 0
@@ -245,6 +238,8 @@ doBasicDR = function(data, params){
   
   if(params$outcome_family == 'multinomial'){
     Y_bag = as.matrix(Y_svy_bag[,-1, with = F])
+  }else if(params$outcome_family == 'binomial'){
+    Y_bag = as.matrix(cbind(y_mean = Y_svy_bag$y_mean, y_comp_mean = 1 - Y_svy_bag$y_mean))
   }else{
     Y_bag = Y_svy_bag$y_mean
   }
@@ -252,22 +247,25 @@ doBasicDR = function(data, params){
   cat(paste0(Sys.time(), "\t Fitting model\n"))
   
   # do basic DR
-  fit = fitLasso(mu_hat = features$mu_hat
+  fit = fitLasso(mu_hat = features$mu_hat[, -1]
                  , Y_bag = Y_bag
                  , phi_x = features$phi_x[, -1]
-                 , family = params$outcome_family
+                 , family = ifelse(params$outcome_family == 'binomial', 'multinomial', params$outcome_family)
                  )
   
   # score the file
-  setnames(fit$Y, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
-  #data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
+  if(params$outcome_family == 'binomial'){
+    fit$Y = fit$Y[, 1] 
+  }
+  setnames(fit$Y, gsub('y_', 'y_hat_', params$outcome))
   
   # calculate mse
   mse_test = calcMSE(Y = as.numeric(unlist(data[get(params$test_ind) == 1, which(names(data) %in% params$outcome), with = F]))
                      , Y_pred = as.numeric(unlist(fit$Y[which(data[,get(params$test_ind) == 1])])))
   
-  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data$bag, y_hat = fit$Y, mse_test = mse_test))
+  return(list(data = data, fit = fit$fit, landmarks = landmarks$landmarks, bags = data[, get(params$which_bag)], y_hat = fit$Y, mse_test = mse_test))
 }
+
 
 
 
