@@ -2,7 +2,7 @@
 
 
 # function fixed from LICORS package
-kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10, 
+kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10, only_centers = F,
                     ...){
   kk <- k
   if (length(dim(data)) == 0) {
@@ -15,7 +15,10 @@ kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10,
   out <- list()
   out$tot.withinss <- Inf
   for (restart in seq_len(nstart)) {
+    cat('Restart ', restart, '\n')
     center_ids <- rep(0, length = kk)
+    
+    cat('Getting start \n')
     if (start == "random") {
       center_ids[1:2] = sample.int(num.samples, 1)
     } else if (start == "normal") {
@@ -26,30 +29,39 @@ kmeanspp = function(data, k = 2, start = "random", iter.max = 100, nstart = 10,
     } else {
       center_ids[1:2] = start
     }
+    cat('Calc first dist \n')
     # calc first dist
     dists <- dista(x = data, xnew = matrix(data[center_ids[1], ], nrow = 1, ncol = ncol(data)), square = TRUE)
     
     for (ii in 2:kk) {
+      cat('Iter ', ii, '\n')
+      cat('\tGetting min \n')
       probs <- apply(dists, 2, min)
-      
+  
       probs[center_ids] <- 0
       #center_ids[ii] <- sample.int(num.samples, 1, prob = probs)
       center_ids[ii] <- sample(c(1:num.samples)[probs > 0], prob = probs[probs > 0], size = 1)
       
       # calc new dists
+      cat('\tCalc new dist \n')
       dists_new <- dista(x = data, xnew = matrix(data[center_ids[ii], ], nrow = 1, ncol = ncol(data)), square = TRUE)
       dists = rbind(dists, dists_new)
     }
     #cat(paste('n unique: ', nrow(unique(data[center_ids, ]))))
     #cat('\n')
     
-    tmp.out <- kmeans(data, centers = data[center_ids, ], 
-                      iter.max = iter.max, ...)
-    tmp.out$inicial.centers <- data[center_ids, ]
-    tmp.out$center_ids <- center_ids
-    if (tmp.out$tot.withinss < out$tot.withinss) {
-      out <- tmp.out
+    if(!only_centers){
+      tmp.out <- kmeans(data, centers = data[center_ids, ], 
+                        iter.max = iter.max, ...)
+      tmp.out$inicial.centers <- data[center_ids, ]
+      tmp.out$center_ids <- center_ids
+      if (tmp.out$tot.withinss < out$tot.withinss) {
+        out <- tmp.out
+      }
+    }else{
+      out = center_ids
     }
+    
   }
   invisible(out)
 }
