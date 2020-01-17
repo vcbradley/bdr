@@ -2,9 +2,7 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="d8e47274-5c2c-4939-95c7-2e964c16641e" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/dictionaries/valeriebradley.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/neuralnets/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/neuralnets/base.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/neuralnets/run_models.py" beforeDir="false" afterPath="$PROJECT_DIR$/neuralnets/run_models.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -18,8 +16,8 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/neuralnets/base.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="1139">
-              <caret line="67" column="23" selection-start-line="67" selection-start-column="23" selection-end-line="67" selection-end-column="23" />
+            <state relative-caret-position="-681">
+              <caret line="11" column="30" lean-forward="true" selection-start-line="11" selection-start-column="30" selection-end-line="11" selection-end-column="30" />
               <folding>
                 <element signature="e#47#78#0" expanded="true" />
               </folding>
@@ -42,8 +40,8 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/neuralnets/radial.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="238">
-              <caret line="19" column="20" selection-start-line="19" selection-start-column="4" selection-end-line="19" selection-end-column="20" />
+            <state relative-caret-position="211">
+              <caret line="31" column="44" selection-start-line="31" selection-start-column="28" selection-end-line="31" selection-end-column="44" />
             </state>
           </provider>
         </entry>
@@ -56,11 +54,8 @@
       <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/neuralnets/run_models.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="463">
-              <caret line="89" column="9" selection-start-line="89" selection-start-column="9" selection-end-line="89" selection-end-column="9" />
-              <folding>
-                <element signature="e#0#47#0" expanded="true" />
-              </folding>
+            <state relative-caret-position="85">
+              <caret line="5" column="18" lean-forward="true" selection-start-line="5" selection-start-column="18" selection-end-line="5" selection-end-column="18" />
             </state>
           </provider>
         </entry>
@@ -95,6 +90,8 @@
     <findStrings>
       <find>Adam</find>
       <find>get_median_sqdist</find>
+      <find>place</find>
+      <find>landma</find>
     </findStrings>
   </component>
   <component name="Git.Settings">
@@ -111,6 +108,7 @@
         <option value="$PROJECT_DIR$/neuralnets/features.py" />
         <option value="$PROJECT_DIR$/neuralnets/utils.py" />
         <option value="$PROJECT_DIR$/neuralnets/train.py" />
+        <option value="$PROJECT_DIR$/neuralnets/base.py" />
         <option value="$PROJECT_DIR$/neuralnets/run_models.py" />
       </list>
     </option>
@@ -178,12 +176,12 @@
       <option name="presentableId" value="Default" />
       <updated>1579193207590</updated>
       <workItem from="1579193209369" duration="2196000" />
-      <workItem from="1579267931923" duration="7267000" />
+      <workItem from="1579267931923" duration="9308000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="9463000" />
+    <option name="totallyTimeSpent" value="11504000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="-184" y="-1080" width="1920" height="1080" extended-state="0" />
@@ -221,16 +219,6 @@
     <entry file="file://$PROJECT_DIR$/nn-implementation/__init__.py" />
     <entry file="file://$PROJECT_DIR$/nn-implementation/base.py" />
     <entry file="file://$PROJECT_DIR$/nn-implementation/simple.py" />
-    <entry file="file://$PROJECT_DIR$/neuralnets/base.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="1139">
-          <caret line="67" column="23" selection-start-line="67" selection-start-column="23" selection-end-line="67" selection-end-column="23" />
-          <folding>
-            <element signature="e#47#78#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/neuralnets/simple.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="4131">
@@ -276,18 +264,25 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/neuralnets/radial.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="238">
-          <caret line="19" column="20" selection-start-line="19" selection-start-column="4" selection-end-line="19" selection-end-column="20" />
+        <state relative-caret-position="211">
+          <caret line="31" column="44" selection-start-line="31" selection-start-column="28" selection-end-line="31" selection-end-column="44" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/neuralnets/base.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-681">
+          <caret line="11" column="30" lean-forward="true" selection-start-line="11" selection-start-column="30" selection-end-line="11" selection-end-column="30" />
+          <folding>
+            <element signature="e#47#78#0" expanded="true" />
+          </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/neuralnets/run_models.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="463">
-          <caret line="89" column="9" selection-start-line="89" selection-start-column="9" selection-end-line="89" selection-end-column="9" />
-          <folding>
-            <element signature="e#0#47#0" expanded="true" />
-          </folding>
+        <state relative-caret-position="85">
+          <caret line="5" column="18" lean-forward="true" selection-start-line="5" selection-start-column="18" selection-end-line="5" selection-end-column="18" />
         </state>
       </provider>
     </entry>
