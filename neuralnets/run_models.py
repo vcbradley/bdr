@@ -10,7 +10,7 @@ from sklearn.metrics.pairwise import rbf_kernel
 import tensorflow as tf
 
 from neuralnets.features import Features
-import neuralnets.radial
+from neuralnets.base import Network
 from neuralnets.radial import build_radial_net
 from neuralnets.train import eval_network, train_network
 from neuralnets.utils import get_median_sqdist, tf_session
@@ -66,12 +66,6 @@ landmark_ind = turnout_ldmks[0].astype(int)
 
 
 
-# X_latlong_grouped = X_latlong.groupby('code_num')
-# X_latlong_np = []
-# for name, group in X_latlong_grouped:
-#     X_latlong_np.append(group.values[:,2:])
-# X_latlong_np
-
 
 #### MAKE FEATURES
 bags = X_latlong.to_numpy()[:,2:]
@@ -86,7 +80,9 @@ args = {'reg_out':0
         , 'dtype_double':False
         , 'type': 'radial'
         , 'init_from_ridge':False
-        , 'landmarks':None
+        , 'landmarks':feats.stacked_features[landmark_ind]
+        , 'opt_landmarks': True
+        , 'optimizer':'adam'
         }
 
 
@@ -105,6 +101,7 @@ def make_network(args, train):
     # get landmarks
     #kw['landmarks'] = landmarks = pick_landmarks(args, train)
     kw['landmarks'] = landmarks = args['landmarks']
+    kw['opt_landmarks'] = args['opt_landmarks']
 
     get_f = partial(rbf_kernel, Y=landmarks, gamma=1 / (2 * bw**2))  #creating a partial function call of rbf_kernel with Y and gamma fixed
     if need_all_feats:
@@ -134,5 +131,26 @@ def make_network(args, train):
     return build_radial_net(**kw)
 
 
-make_network(args, feats)
+def train_net(sess, args, net, train, val):
+    optimizer = {
+        'adam': tf.optimizers.Adam,
+        'sgd': tf.optimizers.SGD,
+    }[args['optimizer']]
+    train_network(sess, net, train, val,
+                  os.path.join(args['out_dir'], 'checkpoints/model'),
+                  batch_pts=args['batch_pts'], batch_bags=args['batch_bags'],
+                  eval_batch_pts=args['eval_batch_pts'],
+                  eval_batch_bags=args['eval_batch_bags'],
+                  max_epochs=args['max_epochs'],
+                  first_early_stop_epoch=args['first_early_stop_epoch'],
+                  optimizer=optimizer,
+                  lr=args['learning_rate'])
 
+
+net = make_network(args, feats)
+
+do_var = hasattr(net, 'output_var')
+d = {'args': args}
+
+sess = tf_session(n_cpus=4)
+train_net(sess, args, net, feats, 500)
