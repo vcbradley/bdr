@@ -13,7 +13,6 @@ tryN = function(expr, max_attempts = 5){
 }
 
 
-
 runModels = function(data, dist_reg_params, max_attempts = 5){
   
   
@@ -173,6 +172,67 @@ runModels = function(data, dist_reg_params, max_attempts = 5){
     fit_dr_sepbags_cust = tryN(doBasicDR(data = data, dist_reg_params))
     #cat(fit_dr_sepbags_cust$mse_test, '\n')
     results[['dr_sepbags_cust']] = fit_dr_sepbags_cust$y_hat
+  }
+  
+  #### make ecological features
+  dist_reg_params$kernel_type = 'rbf_age'
+  dist_reg_params$weight_col = NULL
+  dist_reg_params$which_bag = 'bag'
+  
+  if(is.null(dist_reg_params$weight_col)){
+    pew_data[, weight := 1]
+  }else{
+    pew_data[, weight := get(dist_reg_params$weight_col)]
+  }
+  
+  kernel_params = getKernParams(X = dist_reg_params$landmarks$X
+                                , kernel_type = dist_reg_params$kernel_type
+                                , sigma = dist_reg_params$sigma)
+  
+  # get features
+  cat(paste0(Sys.time(), "\t Making features\n"))
+  ecol_features = getFeatures(data = dist_reg_params$landmarks$X
+                              , bag = as.numeric(pew_data[, get(dist_reg_params$which_bag)])
+                              , train_ind = as.numeric(pew_data[, get(dist_reg_params$train_ind)])
+                              , landmarks = dist_reg_params$landmarks$landmarks
+                              , kernel_params = kernel_params
+                              , weight = as.numeric(pew_data[, weight]))
+  
+  
+  if(is.null(dist_reg_params$model_list) | 'logit_bagfeat' %in% dist_reg_params$model_list){
+    cat("\tFitting Logit w/ ecol features - bags\t")
+    
+    X_bag = merge(data.table('bag' = ecol_features$phi_x$bag), ecol_features$mu_hat, by = 'bag', sort = F, all.x = T)
+    X_bag = scale(X_bag)
+    X_bag_mat = cbind(X_lasso, as.matrix(X_bag[, 2:ncol(X_bag)]))
+    
+    fit_logit_bagfeat = tryN(fitLasso(mu_hat = X_bag_mat[which(pew_data$matched == 1), ]
+                              , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                              , phi_x = X_bag_mat
+                              , family = dist_reg_params$outcome_family
+    ))
+    
+    setnames(fit_logit_bagfeat$Y_hat, gsub('y_','y_hat_', dist_reg_params$outcome))
+    results[['logit_bagfeat']] = fit_logit_bagfeat$Y_hat
+  }
+  
+  
+  if(is.null(dist_reg_params$model_list) | 'logit_regfeat' %in% dist_reg_params$model_list){
+    cat("\tFitting Logit w/ ecol features - region\t")
+    
+    mu_hat_reg = aggregate(ecol_features$phi_x, by = list('demo_region' = pew_data$demo_region), FUN = mean)
+    X_reg = merge(data.table('demo_region' = pew_data$demo_region), mu_hat_reg, by = 'demo_region', sort = F, all.x = T)
+    X_reg = scale(as.matrix(X_reg[, 2:ncol(X_reg), with = F]))
+    X_reg_mat = cbind(X_lasso, X_reg)
+    
+    fit_logit_bagfeat = tryN(fitLasso(mu_hat = X_reg_mat[which(pew_data$matched == 1), ]
+                                      , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                                      , phi_x = X_reg_mat
+                                      , family = dist_reg_params$outcome_family
+    ))
+    
+    setnames(fit_logit_bagfeat$Y_hat, gsub('y_','y_hat_', dist_reg_params$outcome))
+    results[['logit_regfeat']] = fit_logit_bagfeat$Y_hat
   }
   
   
