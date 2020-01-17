@@ -59,7 +59,7 @@ run_settings = list()
 # # randomly choose settings
 run_settings$party = sample(c('insurvey', 'onfile'), size = 1)
 #run_settings$refit_bags = sample(c(T, F), prob = c(0.4, 0.6), size = 1)
-run_settings$refit_bags = sample(c(T, F), size = 1)
+#run_settings$refit_bags = sample(c(T, F), size = 1)
 #run_settings$match_rate = runif(min = 0.01, max = 1, n = 1)
 run_settings$match_rate = rbeta(1, 2, n = 1)
 #run_settings$n_bags = round(runif(min = 40, max = 150, n = 1))
@@ -190,12 +190,9 @@ setnames(lasso_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
 
 
 # calculate mse
-calcMSE(Y = as.numeric(unlist(pew_data[get(dist_reg_params$test_ind) == 1, which(names(pew_data) %in% dist_reg_params$outcome), with = F]))
-                   , Y_pred = as.numeric(unlist(lasso_fit$Y_hat[which(pew_data[,get(dist_reg_params$test_ind) == 1])])))
 
 
-
-cat("\tFitting LOGIT\t")
+cat("\tFitting Ecol Feats\t")
 X_ecol = merge(data.table('bag' = features$phi_x$bag), features$mu_hat, by = 'bag', sort = F, all.x = T)
 X_ecol_mat = as.matrix(X_ecol[, 2:ncol(X_ecol), with = F])
 
@@ -209,12 +206,62 @@ lasso_ecol_fit = tryN(fitLasso(mu_hat = X_lasso_and_ecol[which(pew_data$matched 
 setnames(lasso_ecol_fit$Y, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
 #data[, paste0(outcome, '_hat') := as.list(data.frame(fit$Y))]
 
+# calculate mse
 
-coef(lasso_fit$fit, s = 'lambda.min')
-coef(lasso_ecol_fit$fit, s = 'lambda.min')
+
+
+cat("\tFitting Regional Feats\t")
+
+
+X_region_mu = aggregate(features$phi_x[which(pew_data$voterfile == 1), -1, with = F]
+                        , by = list(demo_region = pew_data[voterfile == 1, ]$demo_region), FUN = mean)
+X_region = merge(data.table('demo_region' = pew_data$demo_region), X_region_mu, by = 'demo_region', sort = F, all.x = T)
+X_region_mat = as.matrix(X_region[, 2:ncol(X_region), with = F])
+
+X_lasso_and_reg = cbind(X_lasso, X_region_mat)
+lasso_reg_fit = tryN(fitLasso(mu_hat = X_lasso_and_reg[which(pew_data$matched == 1), ]
+                               , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                               , phi_x = X_lasso_and_reg
+                               , family = 'multinomial'
+                              , alpha = 1
+))
+
+setnames(lasso_reg_fit$Y, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+# calculate mse
+
+
+
+# Check what happens when we add another kernel layer
+
+X_lasso_and_reg = scale(X_lasso_and_reg[, -1])
+kernel_params = getKernParams(X_lasso_and_reg, kernel_type = 'rbf', sigma = 'median')
+kern_temp = getCustomKern(X = X_lasso_and_reg, Y = X_lasso_and_reg[landmarks$center_ids,], kernel_params = kernel_params)
+colnames(kern_temp) = paste0('feat', 1:ncol(kern_temp))
+
+
+krr_fit = tryN(fitLasso(mu_hat = kern_temp[which(pew_data$matched == 1), ]
+                              , Y_bag = as.matrix(pew_data[matched == 1, .SD, .SDcols = dist_reg_params$outcome])
+                              , phi_x = kern_temp
+                              , family = 'multinomial'
+                              , alpha = 1
+))
+
+setnames(krr_fit$Y_hat, c('y_hat_dem', 'y_hat_rep', 'y_hat_oth'))
+
+
+
 
 # calculate mse
 calcMSE(Y = as.numeric(unlist(pew_data[get(dist_reg_params$test_ind) == 1, which(names(pew_data) %in% dist_reg_params$outcome), with = F]))
-                   , Y_pred = as.numeric(unlist(lasso_ecol_fit$Y_hat[which(pew_data[,get(dist_reg_params$test_ind) == 1])])))
+        , Y_pred = as.numeric(unlist(lasso_fit$Y_hat[which(pew_data[,get(dist_reg_params$test_ind) == 1])])))
+
+calcMSE(Y = as.numeric(unlist(pew_data[get(dist_reg_params$test_ind) == 1, which(names(pew_data) %in% dist_reg_params$outcome), with = F]))
+        , Y_pred = as.numeric(unlist(lasso_ecol_fit$Y_hat[which(pew_data[,get(dist_reg_params$test_ind) == 1])])))
+
+calcMSE(Y = as.numeric(unlist(pew_data[get(dist_reg_params$test_ind) == 1, which(names(pew_data) %in% dist_reg_params$outcome), with = F]))
+        , Y_pred = as.numeric(unlist(lasso_reg_fit$Y_hat[which(pew_data[,get(dist_reg_params$test_ind) == 1])])))
+
+calcMSE(Y = as.numeric(unlist(pew_data[get(dist_reg_params$test_ind) == 1, which(names(pew_data) %in% dist_reg_params$outcome), with = F]))
+        , Y_pred = as.numeric(unlist(krr_fit$Y_hat[which(pew_data[,get(dist_reg_params$test_ind) == 1])])))
 
 
