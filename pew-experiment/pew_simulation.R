@@ -17,7 +17,7 @@ getDoParWorkers()
 setwd('~/github/bdr')
 x = sourceDirectory('~/github/bdr/utils', modifiedOnly=FALSE)
 
-results_dir = '~/github/bdr/pew-experiment/results/sim_randparams_v2/'
+results_dir = '~/github/bdr/ecological features/sim_results/v1/'
 
 if(!dir.exists(results_dir)){
   dir.create(results_dir)
@@ -27,9 +27,16 @@ if(!dir.exists(results_dir)){
 ### Read in data
 pew_data = fread('data/data_recoded_v2.csv')
 
+#drop others for testing
+#pew_data = pew_data[!y_oth == 1]
+
 
 n_holdout = 1000
 n_surveyed = 2000
+
+model_list = c('logit_alldata', 'logit', 
+               'dr', 'dr_sepbags', 'logit_regfeat', 'logit_bagfeat'
+               )
 
 
 #---------------------------------------------------------------------------
@@ -82,7 +89,8 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
                       , '_match', round(run_settings$match_rate * 100)
                       , '_bags', run_settings$n_bags
                       , '_lmks', run_settings$n_landmarks
-                      , '_refitbags', run_settings$refit_bags)
+                      #, '_refitbags', run_settings$refit_bags
+                      )
   
 
   
@@ -166,22 +174,24 @@ results_mses = foreach::foreach(i=1:200) %dopar%{
                          , score_bags_vars = vars$file_and_survey
                          , regression_vars = regression_vars
                          , outcome = c('y_dem', 'y_rep', 'y_oth')
+                         #, outcome = c('y_dem')
                          , n_bags = run_settings$n_bags
                          , outcome_family = 'multinomial'
                          , train_ind = 'voterfile'
                          , test_ind = 'holdout'
                          , bagging_ind = 'surveyed'
                          , kernel_type = 'rbf'
-                         , weight_col = NULL)
+                         , weight_col = NULL
+                         , model_list = model_list)
   
   
   #-----------------------------------------
   ## fix bags
   cat("\tGetting bags\n")
-  bags = getBags(data = data[surveyed == 1,]
+  bags = getBags(data = pew_data[surveyed == 1,]
                  , vars = vars$file_and_survey
                  , n_bags = dist_reg_params$n_bags
-                 , newdata = data[, vars$file_and_survey, with = F])
+                 , newdata = pew_data[, vars$file_and_survey, with = F])
   
   # # if we're refitting bags, create new bag just using the unmatched survey data
   # if(dist_reg_params$refit_bags){

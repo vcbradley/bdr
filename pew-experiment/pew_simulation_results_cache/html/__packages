@@ -2,3 +2,10 @@ base
 ggplot2
 data.table
 knitr
+R.methodsS3
+R.oo
+R.utils
+Rcpp
+RcppZiggurat
+Rfast
+kernlab

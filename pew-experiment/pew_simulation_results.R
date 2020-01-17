@@ -3,7 +3,8 @@ library(data.table)
 library(knitr)
 library(R.utils)
 
-results_dir = '~/github/bdr/pew-experiment/results/sim_randparams_v2/'
+#results_dir = '~/github/bdr/pew-experiment/results/sim_randparams_v2/'
+results_dir = '~/github/bdr/ecological features/sim_results/v1/'
 
 # set the working directory
 setwd(results_dir)
@@ -51,9 +52,11 @@ if(file.exists(paste0(results_dir, 'bias_summary.csv'))){
   
   holdout_error = rbindlist(lapply(pred_files, function(f){
     temp = fread(f)
+    #cat(paste(f, '\n'))
     holdout_ind = which(temp[model == 'logit',]$holdout == 1)
     
     temp$act_class = rep(pew_data$support, length(unique(temp$model)))
+    temp[is.na(temp$y_hat_oth), ] <- 0
     temp[, pred_class := c('1-Dem', '2-Rep', '3-Oth')[apply(temp[, .(y_hat_dem, y_hat_rep, y_hat_oth)], 1, which.max)]]
     temp[, correct_class := as.numeric(act_class == pred_class)]
     
@@ -61,7 +64,7 @@ if(file.exists(paste0(results_dir, 'bias_summary.csv'))){
                                                , y_hat_rep = mean(y_hat_rep)
                                                , y_hat_oth = mean(y_hat_oth)
                                                , class_rate = mean(correct_class)
-    ), by = .(model, results_id, match_rate, n_bags, n_landmarks, refit_bags, party)]
+    ), by = .(model, results_id, match_rate, n_bags, n_landmarks, party)]
     , pew_data[holdout_ind, .(y_dem = mean(y_dem)
                               , y_rep = mean(y_rep)
                               , y_oth = mean(y_oth)
@@ -127,10 +130,12 @@ plot_bias = function(data, x, x_lab = NULL){
 # TOPLINE
 mses[, model_order := factor(model, levels = c('lasso_alldata', 'lasso','grpmean'
                                               , 'dr_sepbags', 'dr_sepbags_lin', 'dr_sepbags_cust', 'wdr_sepbags'
-                                              , 'dr', 'dr_linear','dr_cust', 'wdr','wdr_linear'))]
+                                              , 'dr', 'dr_linear','dr_cust', 'wdr','wdr_linear'
+                                              , 'lasso_bagfeat', 'lasso_regfeat'))]
 holdout_error[, model_order := factor(model, levels = c('lasso_alldata', 'lasso','grpmean'
                                                , 'dr_sepbags', 'dr_sepbags_lin', 'dr_sepbags_cust', 'wdr_sepbags'
-                                               , 'dr', 'dr_linear','dr_cust', 'wdr','wdr_linear'))]
+                                               , 'dr', 'dr_linear','dr_cust', 'wdr','wdr_linear'
+                                               , 'lasso_bagfeat', 'lasso_regfeat'))]
 plot_mse_dist = ggplot(mses[mse < 0.3], aes(x = model_order, y = mse )) + geom_boxplot() + 
   facet_grid(~party, scales = 'free', labeller = labeller(party = function(p) paste0('party: ', p))) + 
   coord_flip() +
@@ -153,7 +158,7 @@ plot_bias_dist
 ggsave(plot_bias_dist, filename = 'plots/plot_bias_dist.png', width = 8, height = 4)
 
 
-model_subset = c('lasso_alldata', 'lasso', 'grpmean', 'dr','wdr','dr_sepbags')
+model_subset = c('lasso_alldata', 'lasso', 'grpmean', 'dr','wdr','dr_sepbags', 'lasso_bagfeat', 'lasso_regfeat')
 
 # MATCH RATE
 plot_matchrate_mse = plot_mse(mses[model %in% model_subset], x = 'match_rate')
