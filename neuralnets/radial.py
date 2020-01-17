@@ -45,14 +45,14 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
                                    trainable=opt_landmarks)
 
     if init_out is None:
-        out = tf.random_normal([n_land, 1], dtype=dtype)
+        out = tf.random.normal([n_land, 1], dtype=dtype)
     else:
         assert np.size(init_out) == n_land
         out = tf.constant(np.resize(init_out, [n_land, 1]), dtype=dtype)
     params['out'] = tf.Variable(out)
 
     if init_out_bias is None:
-        out_bias = tf.random_normal([1], dtype=dtype)
+        out_bias = tf.random.normal([1], dtype=dtype)
     else:
         out_bias = tf.constant(init_out_bias, shape=(), dtype=dtype)
     params['out_bias'] = tf.Variable(out_bias)
