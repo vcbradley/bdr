@@ -40,7 +40,7 @@ def get_median_sqdist(feats, n_sub=1000):
 @contextmanager
 def tf_session(n_cpus=1, config_args={}, **kwargs):
     import tensorflow as tf
-    config = tf.ConfigProto(intra_op_parallelism_threads=n_cpus,
+    config = tf.compat.v1.ConfigProto(intra_op_parallelism_threads=n_cpus,
                             inter_op_parallelism_threads=n_cpus, **config_args)
-    with tf.Session(config=config) as sess:
+    with tf.compat.v1.Session(config=config) as sess:
         yield sess

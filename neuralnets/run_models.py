@@ -5,8 +5,11 @@ import sys
 
 import numpy as np
 import pandas as pd
+import importlib as imp
 from sklearn.linear_model import Ridge
 from sklearn.metrics.pairwise import rbf_kernel
+from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
+from sklearn.utils import check_random_state
 import tensorflow as tf
 
 from neuralnets.features import Features
@@ -23,7 +26,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-
+# imp.reload(Features)
+# imp.reload(radial)
+# imp.reload(neuralnets.train)
+#
 
 
 ############## START CODE ################
@@ -70,8 +76,25 @@ landmark_ind = turnout_ldmks[0].astype(int)
 #### MAKE FEATURES
 bags = X_latlong.to_numpy()[:,2:]
 n_pts = X_latlong.groupby('code_num')['code_num'].count().to_numpy()
+# feats = Features(bags = bags, n_pts=n_pts, stack=True, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
+#
+# X_latlong_grouped = X_latlong.groupby('code_num').apply(pd.Series.tolist).tolist()
+#
+# np.concatenate(X_latlong_grouped)
+#
+# X_latlong_np = []
+# for i,v in enumerate(X_latlong_grouped): print(i):
+#     X_latlong_np.append(v[:,2:])
+# X_latlong_np
+# feats = Features(bags = X_latlong_np, stack=False, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
 
-feats = Features(bags = bags, n_pts=n_pts, stack=True, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
+i = X_latlong['code_num'].values
+ukeys, slices = np.unique(i, True)
+X_latlong_array = np.split(X_latlong.iloc[:, 2:].values, slices[1:])
+
+feats = Features(bags = X_latlong_array, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
+feats.make_stacked()
+feats.stacked
 
 
 args = {'reg_out':0
@@ -82,8 +105,60 @@ args = {'reg_out':0
         , 'init_from_ridge':False
         , 'landmarks':feats.stacked_features[landmark_ind]
         , 'opt_landmarks': True
+
         , 'optimizer':'adam'
+        , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
+        , 'batch_pts':np.inf
+        , 'batch_bags':30
+        , 'eval_batch_pts':np.inf
+        , 'eval_batch_bags':100
+        , 'max_epochs':1000
+        , 'first_early_stop_epoch':1000/3
+        , 'learning_rate':0.01
+
+        #, 'n_estop':50
+        , 'test_size':0.2
+        , 'trainval_size':None
+        , 'val_size':0.1875
+        , 'train_estop_size':None
+        , 'estop_size':0.23
+        ,'train_size':None
+        , 'split_seed':np.random.randint(2**32)
         }
+
+
+def _split_feats(args, feats, labels=None, groups=None):
+    if groups is None:
+        ss = ShuffleSplit
+    else:
+        ss = GroupShuffleSplit
+
+    rs = check_random_state(args['split_seed'])
+    test_splitter = ss(
+        1, train_size=args['trainval_size'], test_size=args['test_size'],
+        random_state=rs)
+    (trainval, test), = test_splitter.split(feats, None, None)
+
+    val_splitter = ss(
+        1, train_size=args['train_estop_size'], test_size=args['val_size'],
+        random_state=rs)
+    X_v = feats[trainval]
+    y_v = None if labels is None else labels[trainval]
+    g_v = None if groups is None else groups[trainval]
+    (train_estop, val), = val_splitter.split(X_v, y_v, g_v)
+
+    estop_splitter = ss(
+        1, train_size=args['train_size'], test_size=args['estop_size'],
+        random_state=rs)
+    X = X_v[train_estop]
+    y = None if labels is None else y_v[train_estop]
+    g = None if groups is None else g_v[train_estop]
+    (train, estop), = estop_splitter.split(X, y, g)
+    return X[train], X[estop], X_v[val], feats[test]
+
+
+train, estop, val, test = _split_feats(args, feats)
+
 
 
 def make_network(args, train):
@@ -130,11 +205,14 @@ def make_network(args, train):
 
     return build_radial_net(**kw)
 
+net = make_network(args, train)
+
+
 
 def train_net(sess, args, net, train, val):
     optimizer = {
-        'adam': tf.optimizers.Adam,
-        'sgd': tf.optimizers.SGD,
+        'adam': tf.compat.v1.train.AdamOptimizer,
+        'sgd': tf.compat.v1.train.GradientDescentOptimizer,
     }[args['optimizer']]
     train_network(sess, net, train, val,
                   os.path.join(args['out_dir'], 'checkpoints/model'),
@@ -147,10 +225,6 @@ def train_net(sess, args, net, train, val):
                   lr=args['learning_rate'])
 
 
-net = make_network(args, feats)
 
-do_var = hasattr(net, 'output_var')
-d = {'args': args}
-
-sess = tf_session(n_cpus=4)
-train_net(sess, args, net, feats, 500)
+with tf_session(n_cpus=4) as sess:
+    train_net(sess, args, net, train, estop)

@@ -27,16 +27,16 @@ def train_network(sess, net, train_f, val_f, checkpoint_path,
         loop_batches, max_pts=eval_batch_pts, max_bags=eval_batch_bags,
         stack=True, shuffle=False)
 
-    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         # Make sure we do update_ops, if we do batch_norm, before stepping
-        optimize_step = optimizer(lr).minimize(net.loss)
+        optimize_step = optimizer(lr).minimize(net.loss)  # var_list required in tf 2.0, but not tf 1.0
 
     cur_min = np.inf  # used for early stopping
     countdown = np.inf
 
-    saver = tf.train.Saver(max_to_keep=1)
-    sess.run(tf.global_variables_initializer())
+    saver = tf.compat.v1.train.Saver(max_to_keep=1)
+    sess.run(tf.compat.v1.global_variables_initializer())
 
     print("Training up to {} epochs; considering early stopping from epoch {}."
           .format(max_epochs, first_early_stop_epoch))
