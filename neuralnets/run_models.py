@@ -112,8 +112,8 @@ args = {'reg_out':0
         , 'batch_bags':30
         , 'eval_batch_pts':np.inf
         , 'eval_batch_bags':100
-        , 'max_epochs':1000
-        , 'first_early_stop_epoch':1000/3
+        , 'max_epochs':500
+        , 'first_early_stop_epoch':100
         , 'learning_rate':0.01
 
         #, 'n_estop':50

@@ -1,0 +1,2 @@
+model_checkpoint_path: "/users/valeriebradley/github/bdr/neuralnets/results/checkpoints/model"
+all_model_checkpoint_paths: "/users/valeriebradley/github/bdr/neuralnets/results/checkpoints/model"
