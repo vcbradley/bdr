@@ -99,39 +99,46 @@ feats.make_stacked()
 feats.stacked
 
 
-###### Set args
-args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
-        , 'reg_out_bias':0  #regression intercept, B_0
-        , 'scale_reg_by_n':False
-        , 'dtype_double':False
-        , 'type': 'radial'          #type pf network to use
-        , 'init_from_ridge':False  #use ridge regression to initialize regression coefs
-        , 'landmarks':feats.stacked_features[landmark_ind]
-        , 'opt_landmarks':False   #whether or not to optimize landmarks too
 
-        , 'optimizer':'adam'
-        , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
-        , 'batch_pts':np.inf
-        , 'batch_bags':30
-        , 'eval_batch_pts':np.inf
-        , 'eval_batch_bags':100
-        , 'max_epochs':10
-        , 'first_early_stop_epoch':10
-        , 'learning_rate':0.01
+def _split_feats(args, feats, labels=None, groups=None):
+    if groups is None:
+        ss = ShuffleSplit
+    else:
+        ss = GroupShuffleSplit
 
-        #, 'n_estop':50
-        , 'test_size':0.2
-        , 'trainval_size':None
-        , 'val_size':0.1875
-        , 'train_estop_size':None
-        , 'estop_size':0.23
-        ,'train_size':None
-        , 'split_seed':np.random.randint(2**32)
-        }
+    rs = check_random_state(args['split_seed'])
+    test_splitter = ss(
+        1, train_size=args['trainval_size'], test_size=args['test_size'],
+        random_state=rs)
+    (trainval, test), = test_splitter.split(feats, None, None)
 
+    val_splitter = ss(
+        1, train_size=args['train_estop_size'], test_size=args['val_size'],
+        random_state=rs)
+    X_v = feats[trainval]
+    y_v = None if labels is None else labels[trainval]
+    g_v = None if groups is None else groups[trainval]
+    (train_estop, val), = val_splitter.split(X_v, y_v, g_v)
 
-train, estop, val, test = _split_feats(args, feats)
+    estop_splitter = ss(
+        1, train_size=args['train_size'], test_size=args['estop_size'],
+        random_state=rs)
+    X = X_v[train_estop]
+    y = None if labels is None else y_v[train_estop]
+    g = None if groups is None else g_v[train_estop]
+    (train, estop), = estop_splitter.split(X, y, g)
+    return X[train], X[estop], X_v[val], feats[test]
 
+def pick_landmarks(args, train):
+    train.make_stacked()
+    rs = check_random_state(args.landmark_seed)
+    if args.kmeans_landmarks:
+        kmeans = KMeans(n_clusters=args.n_landmarks, random_state=rs, n_jobs=1)
+        kmeans.fit(train.stacked_features)
+        return kmeans.cluster_centers_
+    else:
+        w = rs.choice(train.total_points, args.n_landmarks, replace=False)
+        return train.stacked_features[w]
 
 
 def make_network(args, train):
@@ -178,8 +185,6 @@ def make_network(args, train):
 
     return build_radial_net(**kw)
 
-net = make_network(args, train)
-
 
 
 def train_net(sess, args, net, train, val):
@@ -215,6 +220,43 @@ def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
         i += len(batch)
     return (preds, pred_vars) if do_var else preds
 
+
+###############################
+
+
+###### Set args
+args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
+        , 'reg_out_bias':0  #regression intercept, B_0
+        , 'scale_reg_by_n':False
+        , 'dtype_double':False
+        , 'type': 'radial'          #type pf network to use
+        , 'init_from_ridge':False  #use ridge regression to initialize regression coefs
+        , 'landmarks':feats.stacked_features[landmark_ind]
+        , 'opt_landmarks':False   #whether or not to optimize landmarks too
+
+        , 'optimizer':'adam'
+        , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
+        , 'batch_pts':np.inf
+        , 'batch_bags':30
+        , 'eval_batch_pts':np.inf
+        , 'eval_batch_bags':100
+        , 'max_epochs':10
+        , 'first_early_stop_epoch':10
+        , 'learning_rate':0.01
+
+        #, 'n_estop':50
+        , 'test_size':0.2
+        , 'trainval_size':None
+        , 'val_size':0.1875
+        , 'train_estop_size':None
+        , 'estop_size':0.23
+        ,'train_size':None
+        , 'split_seed':np.random.randint(2**32)
+        }
+
+
+train, estop, val, test = _split_feats(args, feats)
+net = make_network(args, train)
 
 d = {'args': args}
 
