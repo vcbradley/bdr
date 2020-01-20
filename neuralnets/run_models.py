@@ -12,6 +12,7 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics.pairwise import rbf_kernel
 from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
 from sklearn.utils import check_random_state
+from sklearn import preprocessing as prep
 
 from sklearn.metrics import r2_score, mean_squared_error
 import tensorflow as tf
@@ -70,27 +71,32 @@ def pick_landmarks(args, train):
         return train.stacked_features[w]
 
 
+network_types = {
+    'simple': build_simple_rbf,
+    'spatial_sep':build_spatsep_rbf
+}
+
+
 def make_network(args, train):
-    kw = {'in_dim': train.dim
+
+    kw = {'bw':np.sqrt(get_median_sqdist(train) / 2)
         , 'reg_out': args['reg_out']
         , 'reg_out_bias': args['reg_out_bias']
         , 'scale_reg_by_n': args['scale_reg_by_n']
         , 'dtype': tf.float64 if args['dtype_double'] else tf.float32
+        , 'outcome_type':args['outcome_type']
+          ,'feat_types':args['feat_types']
           }
-
-    kw['bw'] = np.sqrt(get_median_sqdist(train) / 2) #* args['bw_scale']
 
     # get landmarks
     #kw['landmarks'] = landmarks = pick_landmarks(args, train)
-    kw['landmarks'] = args['landmarks']
+    landmarks = args['landmarks']
     kw['opt_landmarks'] = args['opt_landmarks']
 
-    if args['type'] == 'radial':
-        net = build_radial_net(**kw)
-    else:
+    if args['type'] != 'simple':
         raise Exception(args['type'] + ' not recognized type of network')
 
-    return net
+    return network_types[args['type']](**kw)
 
 
 
@@ -122,6 +128,11 @@ if __name__ == '__main__':
     X_scores = pd.read_pickle(data_path + '/X_scores.pkl')
     X_demo = pd.read_pickle(data_path + '/X_demo.pkl')
 
+    X_all = np.concatenate((X_latlong.iloc[:,2:], X_scores.iloc[:,2:], X_demo.iloc[:,2:]), axis = 1)
+    X_all_types = np.concatenate((np.repeat('latlong', X_latlong.shape[1] - 2),
+                                  np.repeat('scores', X_scores.shape[1] - 2),
+                                  np.repeat('demo', X_demo.shape[1] - 2)))
+
     ## outcome data
     outcome_data = pd.read_pickle(data_path + '/outcome_data.pkl')
     outcome_data['constituency_lower'] = outcome_data['constituency'].str.lower()
@@ -146,21 +157,26 @@ if __name__ == '__main__':
 
     i = X_latlong['code_num'].values
     ukeys, slices = np.unique(i, True)
-    X_latlong_array = np.split(X_latlong.iloc[:, 2:].values, slices[1:])
+    X_all_array = np.split(X_all, slices[1:])
 
-    feats = Features(bags=X_latlong_array, copy=False, bare=False, y=outcome_data['pct_turnout_ge2017'])
+    feats = Features(bags=X_all_array, copy=False, bare=False, y=outcome_data['pct_turnout_ge2017'])
     feats.make_stacked()
     # feats.stacked
+
+
+
 
     #### SET ARGS
     args = {'reg_out': 0  # regularization param for regression coefs
         , 'reg_out_bias': 0  # regularisation param for regression intercept
         , 'scale_reg_by_n': False
         , 'dtype_double': False
-        , 'type': 'radial'  # type pf network to use
+        , 'type': 'simple'  # type pf network to use
         , 'init_from_ridge': False  # use ridge regression to initialize regression coefs
         , 'landmarks': feats.stacked_features[landmark_ind]
         , 'opt_landmarks': False  # whether or not to optimize landmarks too
+        , 'outcome_type':'binary'
+        , 'feat_types':X_all_types
 
         , 'optimizer': 'adam'
         , 'out_dir': '/users/valeriebradley/github/bdr/neuralnets/results/'
@@ -175,7 +191,7 @@ if __name__ == '__main__':
             # , 'n_estop':50
         , 'test_size': 0.2
         , 'trainval_size': None
-        , 'val_size': 0.1875
+        , 'val_size': 0.1
         , 'train_estop_size': None
         , 'estop_size': 0.23
         , 'train_size': None
@@ -202,7 +218,7 @@ if __name__ == '__main__':
         # whether we want to evaluate the variance as well (which we ignore)
         do_var = False
 
-        for name, ds in [('val', val), ('test', test)]:
+        for name, ds in [('train', train), ('val', val), ('test', test)]:
             print()
             preds = eval_network(sess, net, ds
                                  , batch_pts=args['eval_batch_pts']
@@ -231,20 +247,15 @@ if __name__ == '__main__':
                 d[name + '_coverage'] = coverage
                 print('{} coverage at 95%: {:.1%}'.format(name, coverage))
 
-    d['log_bw:0']
-    d['out_bias:0']
-    d['out:0']  # regression coefficients
-    d['out:0'].shape
-    # d['landmarks:0']
-
 
 
 def plot_results(d, save_file = None):
     x = np.linspace(min(d['test_preds']), max(d['test_preds']), 100)
     plt.plot(x, x, linestyle='--', color='black')
 
+    plt.plot(d['train_y'], d['train_preds'], 'o', label='training set')
     plt.plot(d['test_y'], d['test_preds'], 'o', label = 'test set')
-    plt.plot(d['val_y'], d['val_preds'], 'x', label = 'validation set')
+    plt.plot(d['val_y'], d['val_preds'], 'o', label = 'validation set')
 
     plt.title("Test set performance")
     plt.xlabel("Actual")
@@ -259,3 +270,12 @@ def plot_results(d, save_file = None):
 
 
 plot_results(d)
+
+#tf.saved_model.load(args['out_dir']+'/checkpoints')
+
+
+d['log_bw:0']
+d['out_bias:0']
+d['out:0']  # regression coefficients
+d['out:0'].shape
+# d['landmarks:0']
