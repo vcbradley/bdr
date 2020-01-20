@@ -10,6 +10,7 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics.pairwise import rbf_kernel
 from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
 from sklearn.utils import check_random_state
+from sklearn.metrics import r2_score, mean_squared_error
 import tensorflow as tf
 
 from neuralnets.features import Features
@@ -17,6 +18,7 @@ from neuralnets.base import Network
 from neuralnets.radial import build_radial_net
 from neuralnets.train import eval_network, train_network
 from neuralnets.utils import get_median_sqdist, tf_session
+from neuralnets.utils import loop_batches
 
 from rpy2.robjects import r, pandas2ri
 pandas2ri.activate()
@@ -97,14 +99,14 @@ feats.make_stacked()
 feats.stacked
 
 
-args = {'reg_out':0
-        , 'reg_out_bias':0
+args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
+        , 'reg_out_bias':0  #regression intercept, B_0
         , 'scale_reg_by_n':False
         , 'dtype_double':False
-        , 'type': 'radial'
-        , 'init_from_ridge':False
+        , 'type': 'radial'          #type pf network to use
+        , 'init_from_ridge':False  #use ridge regression to initialize regression coefs
         , 'landmarks':feats.stacked_features[landmark_ind]
-        , 'opt_landmarks': True
+        , 'opt_landmarks':False   #whether or not to optimize landmarks too
 
         , 'optimizer':'adam'
         , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
@@ -112,8 +114,8 @@ args = {'reg_out':0
         , 'batch_bags':30
         , 'eval_batch_pts':np.inf
         , 'eval_batch_bags':100
-        , 'max_epochs':500
-        , 'first_early_stop_epoch':100
+        , 'max_epochs':10
+        , 'first_early_stop_epoch':10
         , 'learning_rate':0.01
 
         #, 'n_estop':50
@@ -226,5 +228,66 @@ def train_net(sess, args, net, train, val):
 
 
 
+def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
+    preds = np.zeros_like(test_f.y)
+    if do_var:
+        pred_vars = np.zeros_like(test_f.y)
+    i = 0
+    for batch in loop_batches(test_f, max_pts=batch_pts, max_bags=batch_bags,
+                              stack=True, shuffle=False):
+        d = net.feed_dict(batch, training=False)
+        if do_var:
+            preds[i:i + len(batch)], pred_vars[i:i + len(batch)] = sess.run(
+                [net.output, net.output_var], feed_dict=d)
+        else:
+            preds[i:i + len(batch)] = net.output.eval(feed_dict=d)
+        i += len(batch)
+    return (preds, pred_vars) if do_var else preds
+
+
+d = {'args': args}
+
 with tf_session(n_cpus=4) as sess:
     train_net(sess, args, net, train, estop)
+
+    #print(tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES))
+    for v in tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES):
+        d[v.name] = v.eval()
+
+    do_var = False
+
+    for name, ds in [('val', val), ('test', test)]:
+        print()
+        preds = eval_network(sess, net, ds
+                             , batch_pts=args['eval_batch_pts']
+                             , batch_bags=args['eval_batch_bags']
+                             , do_var=do_var)
+        if do_var:
+            preds, preds_var = preds
+            d[name + '_preds_var'] = preds_var
+
+        d[name + '_y'] = y = ds.y
+        d[name + '_preds'] = preds
+
+        d[name + '_mse'] = mse = mean_squared_error(y, preds)
+        print('{} MSE: {}'.format(name, mse))
+
+        d[name + '_r2'] = r2 = r2_score(y, preds)
+        print('{} R2: {}'.format(name, r2))
+
+        if do_var:
+            liks = stats.norm.pdf(y, preds, np.sqrt(preds_var))
+            d[name + '_nll'] = nll = -np.log(liks).mean()
+            print('{} NLL: {}'.format(name, nll))
+
+            cdfs = stats.norm.cdf(y, preds, np.sqrt(preds_var))
+            coverage = np.mean((cdfs > .025) & (cdfs < .975))
+            d[name + '_coverage'] = coverage
+            print('{} coverage at 95%: {:.1%}'.format(name, coverage))
+
+
+d['log_bw:0']
+d['out_bias:0']
+d['out:0']  #regression coefficients
+d['out:0'].shape
+d['landmarks:0']
