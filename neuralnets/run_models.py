@@ -8,12 +8,12 @@ import pandas as pd
 import importlib as imp
 from sklearn.linear_model import Ridge
 from sklearn.metrics.pairwise import rbf_kernel
-from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
-from sklearn.utils import check_random_state
+
+
 from sklearn.metrics import r2_score, mean_squared_error
 import tensorflow as tf
 
-from neuralnets.features import Features
+from neuralnets.features import Features, _split_feats
 from neuralnets.base import Network
 from neuralnets.radial import build_radial_net
 from neuralnets.train import eval_network, train_network
@@ -99,6 +99,7 @@ feats.make_stacked()
 feats.stacked
 
 
+###### Set args
 args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
         , 'reg_out_bias':0  #regression intercept, B_0
         , 'scale_reg_by_n':False
@@ -127,36 +128,6 @@ args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
         ,'train_size':None
         , 'split_seed':np.random.randint(2**32)
         }
-
-
-def _split_feats(args, feats, labels=None, groups=None):
-    if groups is None:
-        ss = ShuffleSplit
-    else:
-        ss = GroupShuffleSplit
-
-    rs = check_random_state(args['split_seed'])
-    test_splitter = ss(
-        1, train_size=args['trainval_size'], test_size=args['test_size'],
-        random_state=rs)
-    (trainval, test), = test_splitter.split(feats, None, None)
-
-    val_splitter = ss(
-        1, train_size=args['train_estop_size'], test_size=args['val_size'],
-        random_state=rs)
-    X_v = feats[trainval]
-    y_v = None if labels is None else labels[trainval]
-    g_v = None if groups is None else groups[trainval]
-    (train_estop, val), = val_splitter.split(X_v, y_v, g_v)
-
-    estop_splitter = ss(
-        1, train_size=args['train_size'], test_size=args['estop_size'],
-        random_state=rs)
-    X = X_v[train_estop]
-    y = None if labels is None else y_v[train_estop]
-    g = None if groups is None else g_v[train_estop]
-    (train, estop), = estop_splitter.split(X, y, g)
-    return X[train], X[estop], X_v[val], feats[test]
 
 
 train, estop, val, test = _split_feats(args, feats)
@@ -250,10 +221,11 @@ d = {'args': args}
 with tf_session(n_cpus=4) as sess:
     train_net(sess, args, net, train, estop)
 
-    #print(tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES))
+    # save weights
     for v in tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES):
         d[v.name] = v.eval()
 
+    # whether we want to evaluate the variance as well (which we ignore)
     do_var = False
 
     for name, ds in [('val', val), ('test', test)]:

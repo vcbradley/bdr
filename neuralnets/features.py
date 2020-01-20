@@ -9,6 +9,8 @@ import warnings
 import numpy as np
 from sklearn.externals.six import iteritems, string_types
 from sklearn.externals.six.moves import xrange
+from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
+from sklearn.utils import check_random_state
 
 
 ################################################################################
@@ -465,3 +467,34 @@ def as_features(X, stack=False, bare=False):
             X.make_stacked()
         return X.bare() if bare else X
     return Features(X, stack=stack, bare=bare)
+
+
+
+def _split_feats(args, feats, labels=None, groups=None):
+    if groups is None:
+        ss = ShuffleSplit
+    else:
+        ss = GroupShuffleSplit
+
+    rs = check_random_state(args['split_seed'])
+    test_splitter = ss(
+        1, train_size=args['trainval_size'], test_size=args['test_size'],
+        random_state=rs)
+    (trainval, test), = test_splitter.split(feats, None, None)
+
+    val_splitter = ss(
+        1, train_size=args['train_estop_size'], test_size=args['val_size'],
+        random_state=rs)
+    X_v = feats[trainval]
+    y_v = None if labels is None else labels[trainval]
+    g_v = None if groups is None else groups[trainval]
+    (train_estop, val), = val_splitter.split(X_v, y_v, g_v)
+
+    estop_splitter = ss(
+        1, train_size=args['train_size'], test_size=args['estop_size'],
+        random_state=rs)
+    X = X_v[train_estop]
+    y = None if labels is None else y_v[train_estop]
+    g = None if groups is None else g_v[train_estop]
+    (train, estop), = estop_splitter.split(X, y, g)
+    return X[train], X[estop], X_v[val], feats[test]
