@@ -75,41 +75,19 @@ def make_network(args, train):
         , 'dtype': tf.float64 if args['dtype_double'] else tf.float32
           }
 
-    kw['bw'] = bw = np.sqrt(get_median_sqdist(train) / 2) #* args['bw_scale']
-    need_means = args['init_from_ridge']
-    need_all_feats = False
+    kw['bw'] = np.sqrt(get_median_sqdist(train) / 2) #* args['bw_scale']
 
     # get landmarks
     #kw['landmarks'] = landmarks = pick_landmarks(args, train)
     kw['landmarks'] = landmarks = args['landmarks']
     kw['opt_landmarks'] = args['opt_landmarks']
 
-    get_f = partial(rbf_kernel, Y=landmarks, gamma=1 / (2 * bw**2))  #creating a partial function call of rbf_kernel with Y and gamma fixed
-    if need_all_feats:
-        train.make_stacked()
-        train_feats = Features(get_f(train.stacked_features), train.n_pts)
-        if need_means:
-            train_means = train_feats.means().stacked_features
-    elif need_means:
-        train_means = np.empty((len(train), landmarks.shape[0]))
-        for i, bag in enumerate(train):
-            train_means[i] = get_f(bag).mean(axis=0)
+    if args['type'] == 'radial':
+        net = build_radial_net(**kw)
+    else:
+        raise Exception(args['type'] + ' not recognized type of network')
 
-    # initialize weights with ridge regression
-    if args['init_from_ridge']:
-        print("Fitting ridge...")
-        ridge = Ridge(alpha=2 * args['reg_out'] * len(train),
-                      solver='saga', tol=0.1, max_iter=500)
-        # Ridge mins  ||y - X w - b||^2 + alpha ||w||^2
-        # we min  1/n ||y - X w - b||^2 + reg_out/2 ||w||^2
-        # (at least in radial...shrinkage a bit different, but w/e)
-        ridge.fit(train_means, train.y)
-        init_mse = mean_squared_error(train.y, ridge.predict(train_means))
-        print("Ridge MSE: {:.4f}".format(init_mse))
-        kw['init_out'] = ridge.coef_
-        kw['init_out_bias'] = ridge.intercept_
-
-    return build_radial_net(**kw)
+    return net
 
 
 
@@ -127,8 +105,6 @@ def train_net(sess, args, net, train, val):
                   first_early_stop_epoch=args['first_early_stop_epoch'],
                   optimizer=optimizer,
                   lr=args['learning_rate'])
-
-
 
 def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
     preds = np.zeros_like(test_f.y)
@@ -160,11 +136,6 @@ def main():
     X_scores = pd.read_pickle(data_path + '/X_scores.pkl')
     X_demo = pd.read_pickle(data_path + '/X_demo.pkl')
 
-    X_constit = pd.get_dummies(X_demo['code_num']
-                               , prefix_sep="__"
-                               , columns=['code_num']
-                               )
-    mean_mat = X_constit.div(X_constit.sum(axis=0), axis=1)
 
     ## outcome data
     outcome_data = pd.read_pickle(data_path + '/outcome_data.pkl')
@@ -200,8 +171,8 @@ def main():
 
 
     #### SET ARGS
-    args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
-            , 'reg_out_bias':0  #regression intercept, B_0
+    args = {'reg_out':0   #regularization param for regression coefs
+            , 'reg_out_bias':0  #regularisation param for regression intercept
             , 'scale_reg_by_n':False
             , 'dtype_double':False
             , 'type': 'radial'          #type pf network to use
@@ -225,7 +196,7 @@ def main():
             , 'val_size':0.1875
             , 'train_estop_size':None
             , 'estop_size':0.23
-            ,'train_size':None
+            , 'train_size':None
             , 'split_seed':np.random.randint(2**32)
             }
 
