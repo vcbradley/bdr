@@ -74,10 +74,12 @@ X_demo = pd.get_dummies(dr_covars[demo_cols]
                              , prefix_sep="__" 
                              , columns=demo_cols
                             )
-X_demo = pd.DataFrame(prep.scale(X_demo), index = dr_covars.index)
+X_demo = pd.concat([X_demo, dr_covars[demo_ind_cols], dr_covars[vh_cols]], axis=1)
+X_demo_scaled = pd.DataFrame(prep.scale(X_demo), index = dr_covars.index)
+X_demo_scaled.columns = X_demo.columns
 
 # concatenate all demo columns
-X_demo = pd.concat([dr_covars[['code_num', 'constituency']], X_demo, dr_covars[demo_ind_cols], dr_covars[vh_cols]], axis=1)
+X_demo = pd.concat([dr_covars[['code_num', 'constituency']], X_demo_scaled], axis=1)
 
 
 
