@@ -23,29 +23,34 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
                      init_out=None,
                      init_out_bias=None,
                      opt_landmarks=True,  #whether or not to optimize the landmarks
-                     precompute_feats=None):
+                     precompute_feats=None
+                     ):
     n_land = landmarks.shape[0]
 
-    if precompute_feats is None:
-        precompute_feats = not opt_landmarks
-    elif precompute_feats:
-        assert not opt_landmarks
+    # if precompute_feats is None:
+    #     precompute_feats = not opt_landmarks
+    # elif precompute_feats:
+    #     assert not opt_landmarks
 
-    net = Network(n_land if precompute_feats else in_dim, n_land, dtype=dtype)
+    #net = Network(n_land if precompute_feats else in_dim, n_land, dtype=dtype)
+    net = Network(in_dim, n_land, dtype=dtype)
     inputs = net.inputs
     params = net.params
-
-    if precompute_feats:
-        net.wants_means_only = True
-        net.landmarks = landmarks  # save outside of tensorflow for convenience
-        net.gamma = 1 / (2 * bw**2)
+    #
+    # if precompute_feats:
+    #     net.wants_means_only = True
+    #     net.landmarks = landmarks  # save outside of tensorflow for convenience
+    #     net.gamma = 1 / (2 * bw**2)
 
     # Model parameters
     params['landmarks'] = tf.Variable(tf.constant(landmarks, dtype=dtype),
                                       trainable=opt_landmarks, name = 'landmarks')
-    params['log_bw'] = tf.Variable(tf.constant(np.log(bw), dtype=dtype),
-                                   trainable=opt_landmarks, name = 'log_bw')
 
+    params['log_bw'] = tf.Variable(tf.constant(np.log(bw), dtype=dtype),
+                                   trainable=True,  # we always want to train the bandwitdth param, not only when we're optimizing landmarks
+                                   name = 'log_bw')
+
+    # initialize the outcome coefs with ridge regression (if we performed it) and randomly otherwise
     if init_out is None:
         out = tf.random.normal([n_land, 1], dtype=dtype)
     else:
@@ -53,21 +58,28 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
         out = tf.constant(np.resize(init_out, [n_land, 1]), dtype=dtype)
     params['out'] = tf.Variable(out, name = 'out')
 
+    # initialize the intercept weight randomly, or with ridge output if we have it
     if init_out_bias is None:
         out_bias = tf.random.normal([1], dtype=dtype)
     else:
         out_bias = tf.constant(init_out_bias, shape=(), dtype=dtype)
     params['out_bias'] = tf.Variable(out_bias, name = 'out_bias')
 
-    if precompute_feats:
-        layer_pool = inputs['X']
-    else:
-        # Compute kernels to landmark points: shape (n_X, n_land)
-        kernel_layer = _rbf_kernel(
-            inputs['X'], params['landmarks'], params['log_bw'])
+    # if precompute_feats:
+    #     layer_pool = inputs['X']
+    # else:
+    #     # Compute kernels to landmark points: shape (n_X, n_land)
+    #     kernel_layer = _rbf_kernel(
+    #         inputs['X'], params['landmarks'], params['log_bw'])
+    #
+    #     # Pool bags: shape (n_bags, n_land)
+    #     layer_pool = net.bag_pool_layer(kernel_layer)
 
-        # Pool bags: shape (n_bags, n_land)
-        layer_pool = net.bag_pool_layer(kernel_layer)
+    # Compute kernels to landmark points: shape (n_X, n_land)
+    kernel_layer = _rbf_kernel(inputs['X'], params['landmarks'], params['log_bw'])
+
+    # Pool bags: shape (n_bags, n_land)
+    layer_pool = net.bag_pool_layer(kernel_layer)
 
     # Output
     out_layer = tf.matmul(layer_pool, params['out'])
