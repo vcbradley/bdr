@@ -18,9 +18,9 @@ def sparse_matrix_placeholders(dtype=np.float32):
     to make the actual object.
     '''
     return SparseInfo(
-        indices=tf.placeholder(tf.int64, [None, 2]),
-        values=tf.placeholder(dtype, [None]),
-        dense_shape=tf.placeholder(tf.int64, [2]),
+        indices=tf.placeholder(tf.int64, [None, 2], name = 'sparse_indicies'),
+        values=tf.placeholder(dtype, [None], name = 'sparse_values'),
+        dense_shape=tf.placeholder(tf.int64, [2], name = 'sparse_dense_shape'),
     )
 
 
@@ -55,11 +55,11 @@ class Network(object):
         self.in_dim = in_dim
         self.n_hidden = n_hidden
         self.inputs = {
-            'X': tf.placeholder(dtype, [None, in_dim]),  # all bags stacked up
-            'sizes': tf.placeholder(dtype, [None]),  # one per bag
+            'X': tf.placeholder(dtype, [None, in_dim], name = 'X'),  # all bags stacked up
+            'sizes': tf.placeholder(dtype, [None], name = 'sizes'),  # one per bag
             'mean_matrix': sparse_matrix_placeholders(dtype),  # n_bags, n_pts
-            'in_training': tf.placeholder(tf.bool, shape=[]),  # for batch norm
-            'y': tf.placeholder(dtype, [None]),  # one per bag
+            'in_training': tf.placeholder(tf.bool, shape=[], name = 'in_training'),  # for batch norm
+            'y': tf.placeholder(dtype, [None], name = 'y'),  # one per bag
         }
         self.params = {}
         self.dtype = dtype
