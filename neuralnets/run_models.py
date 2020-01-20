@@ -5,6 +5,8 @@ import sys
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 import importlib as imp
 from sklearn.linear_model import Ridge
 from sklearn.metrics.pairwise import rbf_kernel
@@ -107,22 +109,6 @@ def train_net(sess, args, net, train, val):
                   optimizer=optimizer,
                   lr=args['learning_rate'])
 
-def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
-    preds = np.zeros_like(test_f.y)
-    if do_var:
-        pred_vars = np.zeros_like(test_f.y)
-    i = 0
-    for batch in loop_batches(test_f, max_pts=batch_pts, max_bags=batch_bags,
-                              stack=True, shuffle=False):
-        d = net.feed_dict(batch, training=False)
-        if do_var:
-            preds[i:i + len(batch)], pred_vars[i:i + len(batch)] = sess.run(
-                [net.output, net.output_var], feed_dict=d)
-        else:
-            preds[i:i + len(batch)] = net.output.eval(feed_dict=d)
-        i += len(batch)
-    return (preds, pred_vars) if do_var else preds
-
 
 ###############################
 
@@ -182,8 +168,8 @@ if __name__ == '__main__':
         , 'batch_bags': 30
         , 'eval_batch_pts': np.inf
         , 'eval_batch_bags': 100
-        , 'max_epochs': 10
-        , 'first_early_stop_epoch': 10
+        , 'max_epochs': 100
+        , 'first_early_stop_epoch': 25
         , 'learning_rate': 0.01
 
             # , 'n_estop':50
@@ -251,4 +237,25 @@ if __name__ == '__main__':
     d['out:0'].shape
     # d['landmarks:0']
 
-    
+
+
+def plot_results(d, save_file = None):
+    x = np.linspace(min(d['test_preds']), max(d['test_preds']), 100)
+    plt.plot(x, x, linestyle='--', color='black')
+
+    plt.plot(d['test_y'], d['test_preds'], 'o', label = 'test set')
+    plt.plot(d['val_y'], d['val_preds'], 'x', label = 'validation set')
+
+    plt.title("Test set performance")
+    plt.xlabel("Actual")
+    plt.ylabel("Predicted")
+    plt.legend()
+
+    plt.show()
+
+    if save_file is not None:
+        save_file
+
+
+
+plot_results(d)
