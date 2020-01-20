@@ -19,7 +19,7 @@ import tensorflow as tf
 
 from neuralnets.features import Features
 from neuralnets.base import Network
-from neuralnets.radial import build_radial_net
+from neuralnets.radial import build_simple_rbf, build_spatsep_rbf
 from neuralnets.train import eval_network, train_network
 from neuralnets.utils import get_median_sqdist, tf_session
 from neuralnets.utils import loop_batches
@@ -79,22 +79,26 @@ network_types = {
 
 def make_network(args, train):
 
-    kw = {'bw':np.sqrt(get_median_sqdist(train) / 2)
+    kw = {'in_dim':train.dim
         , 'reg_out': args['reg_out']
         , 'reg_out_bias': args['reg_out_bias']
         , 'scale_reg_by_n': args['scale_reg_by_n']
         , 'dtype': tf.float64 if args['dtype_double'] else tf.float32
         , 'outcome_type':args['outcome_type']
-          ,'feat_types':args['feat_types']
           }
+
+    kw['bw'] = np.sqrt(get_median_sqdist(train) / 2)
 
     # get landmarks
     #kw['landmarks'] = landmarks = pick_landmarks(args, train)
-    landmarks = args['landmarks']
+    kw['landmarks'] = args['landmarks']
     kw['opt_landmarks'] = args['opt_landmarks']
 
+    # if args['type'] != 'simple':
+    #     raise Exception(args['type'] + ' not recognized type of network')
+
     if args['type'] != 'simple':
-        raise Exception(args['type'] + ' not recognized type of network')
+        kw['feat_types'] = args['feat_types']
 
     return network_types[args['type']](**kw)
 
@@ -133,6 +137,10 @@ if __name__ == '__main__':
                                   np.repeat('scores', X_scores.shape[1] - 2),
                                   np.repeat('demo', X_demo.shape[1] - 2)))
 
+    v, i = np.unique(X_all_types, True)
+    feat_bounds = np.sort(i)[1:]
+
+
     ## outcome data
     outcome_data = pd.read_pickle(data_path + '/outcome_data.pkl')
     outcome_data['constituency_lower'] = outcome_data['constituency'].str.lower()
@@ -165,13 +173,12 @@ if __name__ == '__main__':
 
 
 
-
     #### SET ARGS
     args = {'reg_out': 0  # regularization param for regression coefs
         , 'reg_out_bias': 0  # regularisation param for regression intercept
         , 'scale_reg_by_n': False
         , 'dtype_double': False
-        , 'type': 'simple'  # type pf network to use
+        , 'type': 'spatial_sep'  # type pf network to use
         , 'init_from_ridge': False  # use ridge regression to initialize regression coefs
         , 'landmarks': feats.stacked_features[landmark_ind]
         , 'opt_landmarks': False  # whether or not to optimize landmarks too
@@ -184,7 +191,7 @@ if __name__ == '__main__':
         , 'batch_bags': 30
         , 'eval_batch_pts': np.inf
         , 'eval_batch_bags': 100
-        , 'max_epochs': 100
+        , 'max_epochs': 10
         , 'first_early_stop_epoch': 25
         , 'learning_rate': 0.01
 
