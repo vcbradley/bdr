@@ -9,8 +9,7 @@ import warnings
 import numpy as np
 from sklearn.externals.six import iteritems, string_types
 from sklearn.externals.six.moves import xrange
-from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
-from sklearn.utils import check_random_state
+
 
 
 ################################################################################

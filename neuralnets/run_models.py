@@ -8,12 +8,13 @@ import pandas as pd
 import importlib as imp
 from sklearn.linear_model import Ridge
 from sklearn.metrics.pairwise import rbf_kernel
-
+from sklearn.model_selection import ShuffleSplit, GroupShuffleSplit
+from sklearn.utils import check_random_state
 
 from sklearn.metrics import r2_score, mean_squared_error
 import tensorflow as tf
 
-from neuralnets.features import Features, _split_feats
+from neuralnets.features import Features
 from neuralnets.base import Network
 from neuralnets.radial import build_radial_net
 from neuralnets.train import eval_network, train_network
@@ -79,7 +80,7 @@ def make_network(args, train):
 
     # get landmarks
     #kw['landmarks'] = landmarks = pick_landmarks(args, train)
-    kw['landmarks'] = landmarks = args['landmarks']
+    kw['landmarks'] = args['landmarks']
     kw['opt_landmarks'] = args['opt_landmarks']
 
     if args['type'] == 'radial':
