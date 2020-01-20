@@ -24,80 +24,6 @@ from rpy2.robjects import r, pandas2ri
 pandas2ri.activate()
 
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-
-# imp.reload(Features)
-# imp.reload(radial)
-# imp.reload(neuralnets.train)
-#
-
-
-############## START CODE ################
-
-#### set params
-data_path = '~/Documents/LibDems/data/projection_data'
-
-
-#######################################
-#### Import data
-
-## import covariate data
-X_latlong = pd.read_pickle(data_path + '/X_latlong.pkl')
-X_scores = pd.read_pickle(data_path + '/X_scores.pkl')
-X_demo = pd.read_pickle(data_path + '/X_demo.pkl')
-
-X_constit = pd.get_dummies(X_demo['code_num']
-                             , prefix_sep="__"
-                             , columns=['code_num']
-                            )
-mean_mat = X_constit.div(X_constit.sum(axis=0), axis=1)
-
-
-## import outcome data
-outcome_data = pd.read_pickle(data_path + '/outcome_data.pkl')
-outcome_data['constituency_lower'] = outcome_data['constituency'].str.lower()
-outcome_data.set_index(['code', 'constituency'], inplace = True)
-
-# add code num to outcome data
-temp = X_demo[['constituency', 'code_num']]
-temp.insert(2,"constituency_lower", temp['constituency'].str.lower())
-temp = temp.groupby(['code_num','constituency_lower']).size().reset_index()
-
-outcome_data = pd.merge(temp, outcome_data, left_on = 'constituency_lower', right_on = 'constituency_lower', how = 'inner')
-
-## import landmark data
-r['load']('~/github/libdems/turnout/turnout_ldmks_300_data.RData')
-turnout_ldmks = r.turnout_ldmks
-landmark_ind = turnout_ldmks[0].astype(int)
-
-
-
-
-#### MAKE FEATURES
-bags = X_latlong.to_numpy()[:,2:]
-n_pts = X_latlong.groupby('code_num')['code_num'].count().to_numpy()
-# feats = Features(bags = bags, n_pts=n_pts, stack=True, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
-#
-# X_latlong_grouped = X_latlong.groupby('code_num').apply(pd.Series.tolist).tolist()
-#
-# np.concatenate(X_latlong_grouped)
-#
-# X_latlong_np = []
-# for i,v in enumerate(X_latlong_grouped): print(i):
-#     X_latlong_np.append(v[:,2:])
-# X_latlong_np
-# feats = Features(bags = X_latlong_np, stack=False, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
-
-i = X_latlong['code_num'].values
-ukeys, slices = np.unique(i, True)
-X_latlong_array = np.split(X_latlong.iloc[:, 2:].values, slices[1:])
-
-feats = Features(bags = X_latlong_array, copy=False, bare=False, y = outcome_data['pct_turnout_ge2017'])
-feats.make_stacked()
-feats.stacked
-
 
 
 def _split_feats(args, feats, labels=None, groups=None):
@@ -223,85 +149,142 @@ def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
 
 ###############################
 
+def main():
 
-###### Set args
-args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
-        , 'reg_out_bias':0  #regression intercept, B_0
-        , 'scale_reg_by_n':False
-        , 'dtype_double':False
-        , 'type': 'radial'          #type pf network to use
-        , 'init_from_ridge':False  #use ridge regression to initialize regression coefs
-        , 'landmarks':feats.stacked_features[landmark_ind]
-        , 'opt_landmarks':False   #whether or not to optimize landmarks too
+    data_path = '~/Documents/LibDems/data/projection_data'
 
-        , 'optimizer':'adam'
-        , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
-        , 'batch_pts':np.inf
-        , 'batch_bags':30
-        , 'eval_batch_pts':np.inf
-        , 'eval_batch_bags':100
-        , 'max_epochs':10
-        , 'first_early_stop_epoch':10
-        , 'learning_rate':0.01
+    #### GET DATA
 
-        #, 'n_estop':50
-        , 'test_size':0.2
-        , 'trainval_size':None
-        , 'val_size':0.1875
-        , 'train_estop_size':None
-        , 'estop_size':0.23
-        ,'train_size':None
-        , 'split_seed':np.random.randint(2**32)
-        }
+    ## covariate data
+    X_latlong = pd.read_pickle(data_path + '/X_latlong.pkl')
+    X_scores = pd.read_pickle(data_path + '/X_scores.pkl')
+    X_demo = pd.read_pickle(data_path + '/X_demo.pkl')
 
+    X_constit = pd.get_dummies(X_demo['code_num']
+                               , prefix_sep="__"
+                               , columns=['code_num']
+                               )
+    mean_mat = X_constit.div(X_constit.sum(axis=0), axis=1)
 
-train, estop, val, test = _split_feats(args, feats)
-net = make_network(args, train)
+    ## outcome data
+    outcome_data = pd.read_pickle(data_path + '/outcome_data.pkl')
+    outcome_data['constituency_lower'] = outcome_data['constituency'].str.lower()
+    outcome_data.set_index(['code', 'constituency'], inplace=True)
 
-d = {'args': args}
+    # add code num to outcome data
+    temp = X_demo[['constituency', 'code_num']]
+    temp.insert(2, "constituency_lower", temp['constituency'].str.lower())
+    temp = temp.groupby(['code_num', 'constituency_lower']).size().reset_index()
 
-with tf_session(n_cpus=4) as sess:
-    train_net(sess, args, net, train, estop)
+    outcome_data = pd.merge(temp, outcome_data, left_on='constituency_lower', right_on='constituency_lower',
+                            how='inner')
 
-    # save weights
-    for v in tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES):
-        d[v.name] = v.eval()
-
-    # whether we want to evaluate the variance as well (which we ignore)
-    do_var = False
-
-    for name, ds in [('val', val), ('test', test)]:
-        print()
-        preds = eval_network(sess, net, ds
-                             , batch_pts=args['eval_batch_pts']
-                             , batch_bags=args['eval_batch_bags']
-                             , do_var=do_var)
-        if do_var:
-            preds, preds_var = preds
-            d[name + '_preds_var'] = preds_var
-
-        d[name + '_y'] = y = ds.y
-        d[name + '_preds'] = preds
-
-        d[name + '_mse'] = mse = mean_squared_error(y, preds)
-        print('{} MSE: {}'.format(name, mse))
-
-        d[name + '_r2'] = r2 = r2_score(y, preds)
-        print('{} R2: {}'.format(name, r2))
-
-        if do_var:
-            liks = stats.norm.pdf(y, preds, np.sqrt(preds_var))
-            d[name + '_nll'] = nll = -np.log(liks).mean()
-            print('{} NLL: {}'.format(name, nll))
-
-            cdfs = stats.norm.cdf(y, preds, np.sqrt(preds_var))
-            coverage = np.mean((cdfs > .025) & (cdfs < .975))
-            d[name + '_coverage'] = coverage
-            print('{} coverage at 95%: {:.1%}'.format(name, coverage))
+    ## landmark data
+    r['load']('~/github/libdems/turnout/turnout_ldmks_300_data.RData')
+    turnout_ldmks = r.turnout_ldmks
+    landmark_ind = turnout_ldmks[0].astype(int)
 
 
-d['log_bw:0']
-d['out_bias:0']
-d['out:0']  #regression coefficients
-d['out:0'].shape
-d['landmarks:0']
+
+    #### MAKE FEATURES
+    # bags = X_latlong.to_numpy()[:, 2:]
+    # n_pts = X_latlong.groupby('code_num')['code_num'].count().to_numpy()
+
+    i = X_latlong['code_num'].values
+    ukeys, slices = np.unique(i, True)
+    X_latlong_array = np.split(X_latlong.iloc[:, 2:].values, slices[1:])
+
+    feats = Features(bags=X_latlong_array, copy=False, bare=False, y=outcome_data['pct_turnout_ge2017'])
+    feats.make_stacked()
+    #feats.stacked
+
+
+    #### SET ARGS
+    args = {'reg_out':0   #regression coefficients, betas, B_1,...B_nlandmarks
+            , 'reg_out_bias':0  #regression intercept, B_0
+            , 'scale_reg_by_n':False
+            , 'dtype_double':False
+            , 'type': 'radial'          #type pf network to use
+            , 'init_from_ridge':False  #use ridge regression to initialize regression coefs
+            , 'landmarks':feats.stacked_features[landmark_ind]
+            , 'opt_landmarks':False   #whether or not to optimize landmarks too
+
+            , 'optimizer':'adam'
+            , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
+            , 'batch_pts':np.inf
+            , 'batch_bags':30
+            , 'eval_batch_pts':np.inf
+            , 'eval_batch_bags':100
+            , 'max_epochs':10
+            , 'first_early_stop_epoch':10
+            , 'learning_rate':0.01
+
+            #, 'n_estop':50
+            , 'test_size':0.2
+            , 'trainval_size':None
+            , 'val_size':0.1875
+            , 'train_estop_size':None
+            , 'estop_size':0.23
+            ,'train_size':None
+            , 'split_seed':np.random.randint(2**32)
+            }
+
+    # split data
+    train, estop, val, test = _split_feats(args, feats)
+
+    # build network
+    net = make_network(args, train)
+
+    # initialize outcome vars
+    d = {'args': args}
+
+    # train and evaluate
+    with tf_session(n_cpus=4) as sess:
+        train_net(sess, args, net, train, estop)
+
+        # save weights
+        for v in tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES):
+            d[v.name] = v.eval()
+
+        # whether we want to evaluate the variance as well (which we ignore)
+        do_var = False
+
+        for name, ds in [('val', val), ('test', test)]:
+            print()
+            preds = eval_network(sess, net, ds
+                                 , batch_pts=args['eval_batch_pts']
+                                 , batch_bags=args['eval_batch_bags']
+                                 , do_var=do_var)
+            if do_var:
+                preds, preds_var = preds
+                d[name + '_preds_var'] = preds_var
+
+            d[name + '_y'] = y = ds.y
+            d[name + '_preds'] = preds
+
+            d[name + '_mse'] = mse = mean_squared_error(y, preds)
+            print('{} MSE: {}'.format(name, mse))
+
+            d[name + '_r2'] = r2 = r2_score(y, preds)
+            print('{} R2: {}'.format(name, r2))
+
+            if do_var:
+                liks = stats.norm.pdf(y, preds, np.sqrt(preds_var))
+                d[name + '_nll'] = nll = -np.log(liks).mean()
+                print('{} NLL: {}'.format(name, nll))
+
+                cdfs = stats.norm.cdf(y, preds, np.sqrt(preds_var))
+                coverage = np.mean((cdfs > .025) & (cdfs < .975))
+                d[name + '_coverage'] = coverage
+                print('{} coverage at 95%: {:.1%}'.format(name, coverage))
+
+
+    d['log_bw:0']
+    d['out_bias:0']
+    d['out:0']  #regression coefficients
+    d['out:0'].shape
+    d['landmarks:0']
+
+
+if __name__ == '__main__':
+    main()
