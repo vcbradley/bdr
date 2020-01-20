@@ -62,7 +62,7 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
 
     # Output
     out_layer = tf.matmul(layer_pool, params['out'])
-    net.output = tf.squeeze(out_layer + params['out_bias'])
+    net.output = tf.sigmoid(tf.squeeze(out_layer + params['out_bias']))
 
     # Loss
     net.early_stopper = tf.reduce_mean(tf.square(net.output - inputs['y']))
