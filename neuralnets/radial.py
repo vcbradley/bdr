@@ -17,16 +17,15 @@ def _rbf_kernel(X, Y, log_bw):
         return tf.exp(-gamma * (-2 * XY + X_sqnorms_row + Y_sqnorms_col))
 
 
-def build_radial_net(in_dim, landmarks, bw, reg_out,
+def build_radial_net(net, landmarks, bw, reg_out,
                      reg_out_bias=0, scale_reg_by_n=False,
                      dtype=tf.float32,
                      init_out=None,
                      init_out_bias=None,
                      opt_landmarks=False,  #whether or not to optimize the landmarks
+                     outcome_type='binary'
                      ):
-    n_land = landmarks.shape[0]
 
-    net = Network(in_dim, n_land, dtype=dtype)
     inputs = net.inputs
     params = net.params
 
@@ -61,8 +60,12 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
     layer_pool = net.bag_pool_layer(kernel_layer)
 
     # Output
-    out_layer = tf.matmul(layer_pool, params['out'])
-    net.output = tf.sigmoid(tf.squeeze(out_layer + params['out_bias']))
+    out_layer = tf.squeeze(tf.matmul(layer_pool, params['out']) + params['out_bias'])
+
+    if outcome_type == 'binary':
+        net.output = tf.sigmoid(out_layer)
+    else:
+        net.output = out_layer
 
     # Loss
     net.early_stopper = tf.reduce_mean(tf.square(net.output - inputs['y']))
