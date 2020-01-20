@@ -126,8 +126,7 @@ def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
 
 ###############################
 
-def main():
-
+if __name__ == '__main__':
     data_path = '~/Documents/LibDems/data/projection_data'
 
     #### GET DATA
@@ -136,7 +135,6 @@ def main():
     X_latlong = pd.read_pickle(data_path + '/X_latlong.pkl')
     X_scores = pd.read_pickle(data_path + '/X_scores.pkl')
     X_demo = pd.read_pickle(data_path + '/X_demo.pkl')
-
 
     ## outcome data
     outcome_data = pd.read_pickle(data_path + '/outcome_data.pkl')
@@ -156,8 +154,6 @@ def main():
     turnout_ldmks = r.turnout_ldmks
     landmark_ind = turnout_ldmks[0].astype(int)
 
-
-
     #### MAKE FEATURES
     # bags = X_latlong.to_numpy()[:, 2:]
     # n_pts = X_latlong.groupby('code_num')['code_num'].count().to_numpy()
@@ -168,37 +164,36 @@ def main():
 
     feats = Features(bags=X_latlong_array, copy=False, bare=False, y=outcome_data['pct_turnout_ge2017'])
     feats.make_stacked()
-    #feats.stacked
-
+    # feats.stacked
 
     #### SET ARGS
-    args = {'reg_out':0   #regularization param for regression coefs
-            , 'reg_out_bias':0  #regularisation param for regression intercept
-            , 'scale_reg_by_n':False
-            , 'dtype_double':False
-            , 'type': 'radial'          #type pf network to use
-            , 'init_from_ridge':False  #use ridge regression to initialize regression coefs
-            , 'landmarks':feats.stacked_features[landmark_ind]
-            , 'opt_landmarks':False   #whether or not to optimize landmarks too
+    args = {'reg_out': 0  # regularization param for regression coefs
+        , 'reg_out_bias': 0  # regularisation param for regression intercept
+        , 'scale_reg_by_n': False
+        , 'dtype_double': False
+        , 'type': 'radial'  # type pf network to use
+        , 'init_from_ridge': False  # use ridge regression to initialize regression coefs
+        , 'landmarks': feats.stacked_features[landmark_ind]
+        , 'opt_landmarks': False  # whether or not to optimize landmarks too
 
-            , 'optimizer':'adam'
-            , 'out_dir':'/users/valeriebradley/github/bdr/neuralnets/results/'
-            , 'batch_pts':np.inf
-            , 'batch_bags':30
-            , 'eval_batch_pts':np.inf
-            , 'eval_batch_bags':100
-            , 'max_epochs':10
-            , 'first_early_stop_epoch':10
-            , 'learning_rate':0.01
+        , 'optimizer': 'adam'
+        , 'out_dir': '/users/valeriebradley/github/bdr/neuralnets/results/'
+        , 'batch_pts': np.inf
+        , 'batch_bags': 30
+        , 'eval_batch_pts': np.inf
+        , 'eval_batch_bags': 100
+        , 'max_epochs': 10
+        , 'first_early_stop_epoch': 10
+        , 'learning_rate': 0.01
 
-            #, 'n_estop':50
-            , 'test_size':0.2
-            , 'trainval_size':None
-            , 'val_size':0.1875
-            , 'train_estop_size':None
-            , 'estop_size':0.23
-            , 'train_size':None
-            , 'split_seed':np.random.randint(2**32)
+            # , 'n_estop':50
+        , 'test_size': 0.2
+        , 'trainval_size': None
+        , 'val_size': 0.1875
+        , 'train_estop_size': None
+        , 'estop_size': 0.23
+        , 'train_size': None
+        , 'split_seed': np.random.randint(2 ** 32)
             }
 
     # split data
@@ -250,13 +245,10 @@ def main():
                 d[name + '_coverage'] = coverage
                 print('{} coverage at 95%: {:.1%}'.format(name, coverage))
 
-
     d['log_bw:0']
     d['out_bias:0']
-    d['out:0']  #regression coefficients
+    d['out:0']  # regression coefficients
     d['out:0'].shape
-    d['landmarks:0']
+    # d['landmarks:0']
 
-
-if __name__ == '__main__':
-    main()
+    
