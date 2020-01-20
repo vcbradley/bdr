@@ -20,8 +20,10 @@ def _rbf_kernel(X, Y, log_bw):
 def build_radial_net(in_dim, landmarks, bw, reg_out,
                      reg_out_bias=0, scale_reg_by_n=False,
                      dtype=tf.float32,
-                     init_out=None, init_out_bias=None,
-                     opt_landmarks=True, precompute_feats=None):
+                     init_out=None,
+                     init_out_bias=None,
+                     opt_landmarks=True,  #whether or not to optimize the landmarks
+                     precompute_feats=None):
     n_land = landmarks.shape[0]
 
     if precompute_feats is None:
@@ -40,22 +42,22 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
 
     # Model parameters
     params['landmarks'] = tf.Variable(tf.constant(landmarks, dtype=dtype),
-                                      trainable=opt_landmarks)
+                                      trainable=opt_landmarks, name = 'landmarks')
     params['log_bw'] = tf.Variable(tf.constant(np.log(bw), dtype=dtype),
-                                   trainable=opt_landmarks)
+                                   trainable=opt_landmarks, name = 'log_bw')
 
     if init_out is None:
         out = tf.random.normal([n_land, 1], dtype=dtype)
     else:
         assert np.size(init_out) == n_land
         out = tf.constant(np.resize(init_out, [n_land, 1]), dtype=dtype)
-    params['out'] = tf.Variable(out)
+    params['out'] = tf.Variable(out, name = 'out')
 
     if init_out_bias is None:
         out_bias = tf.random.normal([1], dtype=dtype)
     else:
         out_bias = tf.constant(init_out_bias, shape=(), dtype=dtype)
-    params['out_bias'] = tf.Variable(out_bias)
+    params['out_bias'] = tf.Variable(out_bias, name = 'out_bias')
 
     if precompute_feats:
         layer_pool = inputs['X']
@@ -78,8 +80,9 @@ def build_radial_net(in_dim, landmarks, bw, reg_out,
         n = tf.cast(tf.squeeze(tf.shape(net.output), [0]), dtype)
         reg_out /= n
         reg_out_bias /= n
+
     net.loss = (
-        net.early_stopper
+        net.early_stopper   #early stopping penalty contribution for regularization
         + reg_out * tf.nn.l2_loss(params['out'])
         + reg_out_bias * tf.nn.l2_loss(params['out_bias'])
     )
