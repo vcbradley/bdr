@@ -11,3 +11,4 @@ pew-experiment/results/sim_randparams_v2/*
 .Rhistory
 *.pyc
 *.pyo
+*.xml
