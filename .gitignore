@@ -12,3 +12,4 @@ pew-experiment/results/sim_randparams_v2/*
 *.pyc
 *.pyo
 *.xml
+.idea/workspace.xml
