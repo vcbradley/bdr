@@ -97,5 +97,11 @@ X_scores.to_pickle(data_path + '/projection_data/X_scores.pkl')
 X_demo.to_pickle(data_path + '/projection_data/X_demo.pkl')
 
 
+X_all = np.concatenate((X_latlong.iloc[:, 2:], X_scores.iloc[:, 2:], X_demo.iloc[:, 2:]), axis=1)
+X_all_types = np.concatenate((np.repeat('latlong', X_latlong.shape[1] - 2),
+                              np.repeat('scores', X_scores.shape[1] - 2),
+                              np.repeat('demo', X_demo.shape[1] - 2)))
 
+v, i = np.unique(X_all_types, True)
+feat_bounds = np.sort(i)[1:]
 
