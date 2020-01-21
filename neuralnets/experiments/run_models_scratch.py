@@ -1,6 +1,7 @@
 from __future__ import division, print_function
 from functools import partial
 import os
+os.chdir('./neuralnets')
 import sys
 
 import numpy as np
@@ -17,8 +18,8 @@ from sklearn import preprocessing as prep
 from sklearn.metrics import r2_score, mean_squared_error
 import tensorflow as tf
 
-from neuralnets.features import Features
-from neuralnets.base import Network
+from features import Features
+from bdr import networks
 from neuralnets.radial import build_simple_rbf, build_spatsep_rbf
 from neuralnets.train import eval_network, train_network
 from neuralnets.utils import get_median_sqdist, tf_session
