@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 '''
 Some utilities for handling bag features taken from skl-groups.
 '''

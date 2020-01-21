@@ -1,5 +1,6 @@
-# adapted from https://github.com/hcllaw/bdr
+#!/usr/bin/env python3
 
+# adapted from https://github.com/hcllaw/bdr
 
 from __future__ import division
 from collections import namedtuple

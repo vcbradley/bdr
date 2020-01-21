@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # adapted from https://github.com/hcllaw/bdr
 
 from __future__ import division
@@ -5,7 +7,7 @@ from __future__ import division
 import numpy as np
 import tensorflow as tf
 
-from neuralnets.base import Network
+from .base import Network
 
 
 def _rbf_kernel(X, Y, log_bw):
