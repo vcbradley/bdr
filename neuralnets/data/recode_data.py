@@ -11,7 +11,7 @@ pandas2ri.activate()  # to translate R obj into pandas df
 
 def recode_covar_data():
 
-    data_path = '~/Documents/LibDems/data/'
+    data_path = '/Users/valeriebradley/Documents/LibDems/data/'
 
     r['load'](data_path + "model_sample_data_cleaned.RData")
     dr_covars = r.dr_covars
@@ -90,19 +90,26 @@ def recode_covar_data():
     X_scores.to_pickle(data_path + '/projection_data/X_scores.pkl')
     X_demo.to_pickle(data_path + '/projection_data/X_demo.pkl')
 
-    X_all = np.concatenate((X_latlong.iloc[:, 2:], X_scores.iloc[:, 2:], X_demo.iloc[:, 2:]), axis=1)
+    X_all = np.concatenate((X_latlong.iloc[:, 2:],
+                            X_scores.iloc[:, 2:],
+                            X_demo.iloc[:, 2:]), axis=1)
+
     var_cat = np.concatenate((np.repeat('latlong', X_latlong.shape[1] - 2),
                                   np.repeat('scores', X_scores.shape[1] - 2),
                                   np.repeat('demo', X_demo.shape[1] - 2)))
 
-    np.save(data_path + '/projection_data/X_all.npy', X_all)
-    np.save(data_path + '/projection_data/var_cat.npy', var_cat)
+    np.save(data_path + 'projection_data/X_all', X_all)
+    np.save(data_path + 'projection_data/var_cat', var_cat)
 
-    return X_demo[['code_num', 'constituency']]
+    constit_code_tbl = X_demo
+    constit_code_tbl.insert(2, "constituency_lower", constit_code_tbl['constituency'].str.lower())
+    constit_code_tbl = constit_code_tbl.groupby(['code_num', 'constituency_lower']).size().reset_index()
+
+    return constit_code_tbl
 
 
 def recode_outcome_data(constit_code_tbl):
-    data_path = '~/Documents/LibDems/data/'
+    data_path = '/Users/valeriebradley//Documents/LibDems/data/'
 
     #############
     #### 2017 GE RESULTS
@@ -208,16 +215,14 @@ def recode_outcome_data(constit_code_tbl):
 
     #########
     # Set constituency code numbers
-
     outcome_data['constituency_lower'] = outcome_data['constituency'].str.lower()
     outcome_data.set_index(['code', 'constituency'], inplace=True)
 
     # add code num to outcome data
-    temp = constit_code_tbl
-    temp.insert(2, "constituency_lower", temp['constituency'].str.lower())
-    temp = temp.groupby(['code_num', 'constituency_lower']).size().reset_index()
-
-    outcome_data = pd.merge(temp, outcome_data, left_on='constituency_lower', right_on='constituency_lower',
+    outcome_data = pd.merge(constit_code_tbl,
+                            outcome_data,
+                            left_on='constituency_lower',
+                            right_on='constituency_lower',
                             how='inner')
 
     ## SAVE DATA
