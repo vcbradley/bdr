@@ -9,3 +9,5 @@ pew-experiment/results/sim_randparams/*
 pew-experiment/results/archive/
 pew-experiment/results/sim_randparams_v2/*
 .Rhistory
+*.pyc
+*.pyo
