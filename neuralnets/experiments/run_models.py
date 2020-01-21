@@ -37,27 +37,36 @@ def _split_feats(args, feats, labels=None, groups=None):
         ss = GroupShuffleSplit
 
     rs = check_random_state(args['split_seed'])
-    test_splitter = ss(
-        1, train_size=args['trainval_size'], test_size=args['test_size'],
-        random_state=rs)
-    (trainval, test), = test_splitter.split(feats, None, None)
 
-    val_splitter = ss(
-        1, train_size=args['train_estop_size'], test_size=args['val_size'],
-        random_state=rs)
-    X_v = feats[trainval]
-    y_v = None if labels is None else labels[trainval]
-    g_v = None if groups is None else groups[trainval]
-    (train_estop, val), = val_splitter.split(X_v, y_v, g_v)
+    test_splitter = ss(1,
+                       train_size=args['test_size'],
+                       random_state=rs)
+    (test_ind, train_estop_val_ind), = test_splitter.split(feats, None, None)
 
-    estop_splitter = ss(
-        1, train_size=args['train_size'], test_size=args['estop_size'],
-        random_state=rs)
-    X = X_v[train_estop]
-    y = None if labels is None else y_v[train_estop]
-    g = None if groups is None else g_v[train_estop]
-    (train, estop), = estop_splitter.split(X, y, g)
-    return X[train], X[estop], X_v[val], feats[test]
+    X_v = feats[train_estop_val_ind]
+    y_v = None if labels is None else labels[train_estop_val_ind]
+    g_v = None if groups is None else groups[train_estop_val_ind]
+
+    if args['val_size'] is not None:
+        val_splitter = ss(1,
+                          train_size=args['val_size'],
+                          random_state=rs)
+        (val_ind, train_estop_ind), = val_splitter.split(X_v, y_v, g_v)
+        val = X_v[val_ind]
+    else:
+        val = None
+        train_estop_ind = list(range(0,len(train_estop_val_ind)))
+
+
+    estop_splitter = ss(1,
+                        train_size=args['estop_size'],
+                        random_state=rs)
+    X = X_v[train_estop_ind]
+    y = None if labels is None else y_v[train_estop_ind]
+    g = None if groups is None else g_v[train_estop_ind]
+    (estop_ind, train_ind), = estop_splitter.split(X, y, g)
+
+    return X[train_ind], X[estop_ind], val, feats[test_ind]
 
 def pick_landmarks(args, train):
     train.make_stacked()
@@ -178,7 +187,7 @@ if __name__ == '__main__':
         , 'reg_out_bias': 0  # regularisation param for regression intercept
         , 'scale_reg_by_n': False
         , 'dtype_double': False
-        , 'type': 'spatial_sep'  # type pf network to use
+        , 'type': 'simple'  # type pf network to use
         , 'init_from_ridge': False  # use ridge regression to initialize regression coefs
         , 'landmarks': feats.stacked_features[landmark_ind]
         , 'opt_landmarks': False  # whether or not to optimize landmarks too
@@ -190,18 +199,15 @@ if __name__ == '__main__':
         , 'batch_pts': np.inf
         , 'batch_bags': 30
         , 'eval_batch_pts': np.inf
-        , 'eval_batch_bags': 100
-        , 'max_epochs': 10
+        , 'eval_batch_bags': 29
+        , 'max_epochs': 200
         , 'first_early_stop_epoch': 25
         , 'learning_rate': 0.01
 
             # , 'n_estop':50
         , 'test_size': 0.2
-        , 'trainval_size': None
-        , 'val_size': 0.1
-        , 'train_estop_size': None
+        , 'val_size': None
         , 'estop_size': 0.23
-        , 'train_size': None
         , 'split_seed': np.random.randint(2 ** 32)
             }
 
@@ -225,7 +231,7 @@ if __name__ == '__main__':
         # whether we want to evaluate the variance as well (which we ignore)
         do_var = False
 
-        for name, ds in [('train', train), ('val', val), ('test', test)]:
+        for name, ds in [('train', train), ('estop', estop), ('test', test)]:
             print()
             preds = eval_network(sess, net, ds
                                  , batch_pts=args['eval_batch_pts']
@@ -262,7 +268,7 @@ def plot_results(d, save_file = None):
 
     plt.plot(d['train_y'], d['train_preds'], 'o', label='training set')
     plt.plot(d['test_y'], d['test_preds'], 'o', label = 'test set')
-    plt.plot(d['val_y'], d['val_preds'], 'o', label = 'validation set')
+    plt.plot(d['estop_y'], d['estop_preds'], 'o', label = 'estop set')
 
     plt.title("Test set performance")
     plt.xlabel("Actual")
@@ -281,8 +287,4 @@ plot_results(d)
 #tf.saved_model.load(args['out_dir']+'/checkpoints')
 
 
-d['log_bw:0']
-d['out_bias:0']
-d['out:0']  # regression coefficients
-d['out:0'].shape
-# d['landmarks:0']
+d

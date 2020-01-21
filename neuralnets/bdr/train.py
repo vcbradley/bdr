@@ -64,6 +64,7 @@ def train_network(sess, net, train_f, val_f, checkpoint_path,
 
     # Training loop
     epoch = -np.inf
+    train_history = {'train_loss':[], 'train_mse':[], 'estop_loss':[], 'estop_mse':[]}
     for epoch in xrange(max_epochs):
         avg_loss = 0
         train_sse = 0
@@ -98,6 +99,12 @@ def train_network(sess, net, train_f, val_f, checkpoint_path,
                 best_epoch = epoch
             else:
                 countdown -= 1
+
+        #save training history
+        # train_history['train_loss'].append(avg_loss)
+        # train_history['train_mse'].append(train_mse)
+        # train_history['estop_loss'].append(val_loss)
+        # train_history['estop_mse'].append(val_mse)
 
         if epoch % display_every == 0:
             s = ("{: 4d}: mean train loss = {:8.5f}, MSE = {:8.5f}; "
