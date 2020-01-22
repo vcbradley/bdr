@@ -90,14 +90,6 @@ def recode_covar_data():
     X_scores.to_pickle(data_path + '/projection_data/X_scores.pkl')
     X_demo.to_pickle(data_path + '/projection_data/X_demo.pkl')
 
-    X_all = np.concatenate((X_latlong.iloc[:, 2:],
-                            X_scores.iloc[:, 2:],
-                            X_demo.iloc[:, 2:]), axis=1)
-
-    var_cat = np.concatenate((np.repeat('latlong', X_latlong.shape[1] - 2),
-                                  np.repeat('scores', X_scores.shape[1] - 2),
-                                  np.repeat('demo', X_demo.shape[1] - 2)))
-
     np.save(data_path + 'projection_data/X_all', X_all)
     np.save(data_path + 'projection_data/var_cat', var_cat)
 
