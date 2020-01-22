@@ -52,15 +52,16 @@ def mean_matrix(feats, sparse=False, dtype=np.float32):
 
 
 class Network(object):
-    def __init__(self, in_dim, n_hidden, dtype=tf.float32):
-        self.in_dim = in_dim
+    def __init__(self, x_dim, n_hidden, y_dim = 1, dtype=tf.float32):
+        self.x_dim = x_dim
+        self.y_dim = y_dim
         self.n_hidden = n_hidden
         self.inputs = {
-            'X': tf.placeholder(dtype, [None, in_dim], name = 'X'),  # all bags stacked up
+            'X': tf.placeholder(dtype, [None, x_dim], name = 'X'),  # all bags stacked up
             'sizes': tf.placeholder(dtype, [None], name = 'sizes'),  # one per bag
             'mean_matrix': sparse_matrix_placeholders(dtype),  # n_bags, n_pts
             'in_training': tf.placeholder(tf.bool, shape=[], name = 'in_training'),  # for batch norm
-            'y': tf.placeholder(dtype, [None], name = 'y'),  # one per bag
+            'y': tf.placeholder(dtype, [None, y_dim], name = 'y'),  # one per bag
         }
         self.params = {}
         self.dtype = dtype

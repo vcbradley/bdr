@@ -19,7 +19,7 @@ def _rbf_kernel(X, Y, log_bw):
         return tf.exp(-gamma * (-2 * XY + X_sqnorms_row + Y_sqnorms_col))
 
 
-def build_simple_rbf(in_dim, landmarks, bw, reg_out,
+def build_simple_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
                      reg_out_bias=0, scale_reg_by_n=False,
                      dtype=tf.float32,
                      init_out=None,
@@ -29,7 +29,7 @@ def build_simple_rbf(in_dim, landmarks, bw, reg_out,
                      ):
 
     n_land = landmarks.shape[0]
-    net = Network(in_dim, n_land, dtype=dtype)
+    net = Network(x_dim, n_land, dtype=dtype, y_dim = y_dim)
 
     inputs = net.inputs
     params = net.params
@@ -42,19 +42,25 @@ def build_simple_rbf(in_dim, landmarks, bw, reg_out,
                                    trainable=True,  # we always want to train the bandwitdth param, not only when we're optimizing landmarks
                                    name = 'log_bw')
 
+    # set output dimensions
+    if outcome_type == 'categorical':
+        n_out = net.y_dim
+    else:
+        n_out = 1
+
     # initialize the outcome coefs with ridge regression (if we performed it) and randomly otherwise
     if init_out is None:
-        out = tf.random.normal([n_land, 1], dtype=dtype)
+        out = tf.random.normal([n_land, n_out], dtype=dtype)
     else:
         assert np.size(init_out) == n_land
-        out = tf.constant(np.resize(init_out, [n_land, 1]), dtype=dtype)
+        out = tf.constant(np.resize(init_out, [n_land, n_out]), dtype=dtype)
     params['out'] = tf.Variable(out, name = 'out')
 
     # initialize the intercept weight randomly, or with ridge output if we have it
     if init_out_bias is None:
-        out_bias = tf.random.normal([1], dtype=dtype)
+        out_bias = tf.random.normal([n_out], dtype=dtype)
     else:
-        out_bias = tf.constant(init_out_bias, shape=(), dtype=dtype)
+        out_bias = tf.constant(np.resize(init_out_bias, [n_out]), dtype=dtype)
     params['out_bias'] = tf.Variable(out_bias, name = 'out_bias')
 
 
@@ -69,6 +75,8 @@ def build_simple_rbf(in_dim, landmarks, bw, reg_out,
 
     if outcome_type == 'binary':
         net.output = tf.sigmoid(out_layer)
+    elif outcome_type == 'categorical':
+        net.output = tf.nn.softmax(out_layer)
     else:
         net.output = out_layer
 
@@ -90,7 +98,7 @@ def build_simple_rbf(in_dim, landmarks, bw, reg_out,
 
 
 
-def build_spatsep_rbf(in_dim, landmarks, bw, reg_out,
+def build_spatsep_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
                      reg_out_bias=0, scale_reg_by_n=False,
                      dtype=tf.float32,
                      init_out=None,
@@ -100,9 +108,9 @@ def build_spatsep_rbf(in_dim, landmarks, bw, reg_out,
                      feat_types=None
                      ):
     # landmarks = args['landmarks']
-    # in_dim = train.dim
+    # x_dim = train.dim
     n_coef = landmarks.shape[0] * 2  # separate coefs for spatial landmarks and demo / scores
-    net = Network(in_dim, n_coef, dtype=dtype)
+    net = Network(x_dim, n_coef, dtype=dtype)
 
     inputs = net.inputs
     params = net.params
@@ -178,7 +186,7 @@ def build_spatsep_rbf(in_dim, landmarks, bw, reg_out,
 
 
 
-def build_spatadd_rbf(in_dim, landmarks, bw, reg_out,
+def build_spatadd_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
                      reg_out_bias=0, scale_reg_by_n=False,
                      dtype=tf.float32,
                      init_out=None,
@@ -188,9 +196,9 @@ def build_spatadd_rbf(in_dim, landmarks, bw, reg_out,
                      feat_types=None
                      ):
     # landmarks = args['landmarks']
-    # in_dim = train.dim
+    # x_dim = train.dim
     n_coef = landmarks.shape[0]
-    net = Network(in_dim, n_coef, dtype=dtype)
+    net = Network(x_dim, n_coef, dtype=dtype)
 
     inputs = net.inputs
     params = net.params
@@ -248,7 +256,7 @@ def build_spatadd_rbf(in_dim, landmarks, bw, reg_out,
     else:
         net.output = out_layer
 
-    # Loss
+    # Loss - without regularization, to be used in early stopping
     net.early_stopper = tf.reduce_mean(tf.square(net.output - inputs['y']))
 
     if scale_reg_by_n:
@@ -257,8 +265,8 @@ def build_spatadd_rbf(in_dim, landmarks, bw, reg_out,
         reg_out_bias /= n
 
     net.loss = (
-        net.early_stopper   #early stopping penalty contribution for regularization
-        + reg_out * tf.nn.l2_loss(params['out'])
+        net.early_stopper
+        + reg_out * tf.nn.l2_loss(params['out'])  #with reglarization
         + reg_out_bias * tf.nn.l2_loss(params['out_bias'])
     )
 

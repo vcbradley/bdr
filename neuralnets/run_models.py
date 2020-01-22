@@ -58,7 +58,7 @@ def get_parsed():
     parser.add_argument('--val-size', default=None)
     parser.add_argument('--estop-size', default=0.23)
     parser.add_argument('--split-seed', default=np.random.randint(2 ** 32))
-    parser.add_argument('--outcome-name', required=True)
+    parser.add_argument('--outcome-name', required=True, nargs = "*")
     parser.add_argument('--outcome-type', default = 'binary')
     parser.add_argument('--out-dir', required=True)
     parser.add_argument('--feat-types', default=None)
@@ -70,7 +70,7 @@ def get_parsed():
     parser.add_argument('--batch-bags', default = 30)
     parser.add_argument('--eval-batch-pts', type=int_inf, default='inf')
     parser.add_argument('--eval-batch-bags', default = 30)
-    parser.add_argument('--max-epochs', default = 200)
+    parser.add_argument('--max-epochs', default = 200, type = int)
     parser.add_argument('--first-early-stop-epoch', type=int, default = None, help="Default: MAX_EPOCHS / 3.")
     parser.add_argument('--learning-rate', default = 0.01)
 
@@ -131,7 +131,8 @@ def pick_landmarks(args, train):
 
 def make_network(args, train):
 
-    kw = {'in_dim':train.dim
+    kw = {'x_dim':train.dim
+          , 'y_dim':train.y.shape[1]
         , 'reg_out': args['reg_out']
         , 'reg_out_bias': args['reg_out_bias']
         , 'scale_reg_by_n': args['scale_reg_by_n']
@@ -174,12 +175,31 @@ def train_net(sess, args, net, train, val):
 
 
 def plot_results(d, save_file = None):
-    x = np.linspace(min(d['test_preds']), max(d['test_preds']), 100)
+    y_dim = d['test_preds'].shape[1]
+
+    if y_dim > 0:
+        x = np.linspace(0., 1., 100)
+    else:
+        x = np.linspace(min(d['test_preds']), max(d['test_preds']), 100)
+
     plt.plot(x, x, linestyle='--', color='black')
 
-    plt.plot(d['train_y'], d['train_preds'], 'o', label='training set')
-    plt.plot(d['test_y'], d['test_preds'], 'o', label = 'test set')
-    plt.plot(d['estop_y'], d['estop_preds'], 'o', label = 'estop set')
+    # plt.plot(d['train_y'], d['train_preds'], 'o', label='training set')
+    # plt.plot(d['test_y'], d['test_preds'], 'o', label = 'test set')
+    # plt.plot(d['estop_y'], d['estop_preds'], 'o', label = 'estop set')
+
+    #fig = plt.figure(figsize=(16, 6))
+    fig.subplots_adjust(hspace=0.4, wspace=0.4)
+    for i in range(0, y_dim - 1):
+        ax = fig.add_subplot(2, 5, i)
+        ax.plot(d['train_y'][:,i], d['train_preds'][:,i], label='training set', alpha = 0.5)
+        ax.plot(d['test_y'][:,i], d['test_preds'][:,i], label='test set', alpha = 0.5)
+        ax.plot(d['estop_y'][:,i], d['estop_preds'][:,i], label='estop set', alpha = 0.5)
+
+        # ax.plot(p_support_df.iloc[plot_samp_ind, i - 1]
+        #         , p_support_std_df.iloc[plot_samp_ind, i - 1], 'ok', markersize=3, alpha=0.2)
+        #title = re.sub('support___', '', support19_constit.columns[i - 1])
+        #ax.set_title(title)
 
     plt.title("Test set performance")
     plt.xlabel("Actual")
@@ -189,7 +209,7 @@ def plot_results(d, save_file = None):
     plt.show()
 
     if save_file is not None:
-        save_file
+        plt.savefig(save_file)
 
 
 ###############################
@@ -283,11 +303,4 @@ if __name__ == '__main__':
                 d[name + '_coverage'] = coverage
                 print('{} coverage at 95%: {:.1%}'.format(name, coverage))
 
-
-
-plot_results(d)
-
-#tf.saved_model.load(args['out_dir']+'/checkpoints')
-
-
-d
+    plot_results(d, save_file=args['out_dir'] + '_ploterror.png')
