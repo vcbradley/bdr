@@ -1,6 +1,7 @@
 
 # usage example
 # python run_models.py --type 'simple' --outcome-name 'pct_turnout_ge2017' --out-dir 'experiments/simple-rbf'
+#  python run_models.py --type simple --outcome-type categorical --outcome-name mrpdec_supp_con mrpdec_supp_lab mrpdec_supp_ld --out-dir experiments/simple-rbf --max-epoch 10
 
 from __future__ import division, print_function
 import os
@@ -62,6 +63,7 @@ def get_parsed():
     parser.add_argument('--outcome-type', default = 'binary')
     parser.add_argument('--out-dir', required=True)
     parser.add_argument('--feat-types', default=None)
+    parser.add_argument('--pred-disagg', default=False, type=int)
 
     # training parameters
     int_inf = lambda x: np.inf if x.lower() in {'inf', 'none'} else int(x)
@@ -177,39 +179,48 @@ def train_net(sess, args, net, train, val):
 def plot_results(d, save_file = None):
     y_dim = d['test_preds'].shape[1]
 
-    if y_dim > 0:
+    if y_dim > 1:
         x = np.linspace(0., 1., 100)
     else:
         x = np.linspace(min(d['test_preds']), max(d['test_preds']), 100)
 
-    plt.plot(x, x, linestyle='--', color='black')
+    c = np.ceil(np.sqrt(y_dim))
+    r = np.ceil(y_dim / c)
 
     # plt.plot(d['train_y'], d['train_preds'], 'o', label='training set')
     # plt.plot(d['test_y'], d['test_preds'], 'o', label = 'test set')
     # plt.plot(d['estop_y'], d['estop_preds'], 'o', label = 'estop set')
 
-    #fig = plt.figure(figsize=(16, 6))
+    fig = plt.figure()
+    #plt.title("Test set performance")
+    #plt.xlabel("Actual")
+    #plt.ylabel("Predicted")
+
     fig.subplots_adjust(hspace=0.4, wspace=0.4)
-    for i in range(0, y_dim - 1):
-        ax = fig.add_subplot(2, 5, i)
-        ax.plot(d['train_y'][:,i], d['train_preds'][:,i], label='training set', alpha = 0.5)
-        ax.plot(d['test_y'][:,i], d['test_preds'][:,i], label='test set', alpha = 0.5)
-        ax.plot(d['estop_y'][:,i], d['estop_preds'][:,i], label='estop set', alpha = 0.5)
 
-        # ax.plot(p_support_df.iloc[plot_samp_ind, i - 1]
-        #         , p_support_std_df.iloc[plot_samp_ind, i - 1], 'ok', markersize=3, alpha=0.2)
-        #title = re.sub('support___', '', support19_constit.columns[i - 1])
-        #ax.set_title(title)
+    # add points
+    for i in range(1, y_dim + 1):
+        ind = i - 1
+        ax = fig.add_subplot(r, c, i)
 
-    plt.title("Test set performance")
-    plt.xlabel("Actual")
-    plt.ylabel("Predicted")
-    plt.legend()
+        # add x = y
+        ax.plot(x, x, linestyle='--', color='black')
 
-    plt.show()
+        # add points
+        ax.plot(d['train_y'][:,ind], d['train_preds'][:,ind], 'o', label='training set', alpha = 0.5)
+        ax.plot(d['test_y'][:,ind], d['test_preds'][:,ind], 'o', label='test set', alpha = 0.5)
+        #ax.plot(d['estop_y'][:,ind], d['estop_preds'][:,ind], 'o', label='estop set', alpha = 0.5)
+
+        title = d['args']['outcome_name'][i-1]
+        ax.set_title(title)
+
+    #fig.legend()
+    #plt.show()
 
     if save_file is not None:
-        plt.savefig(save_file)
+        fig.savefig(save_file)
+
+    return fig
 
 
 ###############################
