@@ -63,7 +63,7 @@ def get_parsed():
     parser.add_argument('--outcome-type', default = 'binary')
     parser.add_argument('--out-dir', required=True)
     parser.add_argument('--feat-types', default=None)
-    parser.add_argument('--pred-disagg', default=False, type=int)
+    parser.add_argument('--pred-disagg', action='store_true', default=False)
 
     # training parameters
     int_inf = lambda x: np.inf if x.lower() in {'inf', 'none'} else int(x)
@@ -176,7 +176,7 @@ def train_net(sess, args, net, train, val):
 
 
 
-def plot_results(d, save_file = None):
+def plot_agg_results(d, save_file = None):
     y_dim = d['test_preds'].shape[1]
 
     if y_dim > 1:
@@ -209,7 +209,6 @@ def plot_results(d, save_file = None):
         # add points
         ax.plot(d['train_y'][:,ind], d['train_preds'][:,ind], 'o', label='training set', alpha = 0.5)
         ax.plot(d['test_y'][:,ind], d['test_preds'][:,ind], 'o', label='test set', alpha = 0.5)
-        #ax.plot(d['estop_y'][:,ind], d['estop_preds'][:,ind], 'o', label='estop set', alpha = 0.5)
 
         title = d['args']['outcome_name'][i-1]
         ax.set_title(title)
@@ -257,6 +256,17 @@ if __name__ == '__main__':
     feats = Features(bags=X_all_array, copy=False, bare=False, y=outcome_data[args['outcome_name']])
     feats.make_stacked()
 
+    #individ feats
+    if args['pred_disagg']:
+        feats_individ = Features(bags=feats.stacked_features, n_pts = np.repeat(1,feats.total_points), copy=False, bare=False)
+        feats_individ.make_stacked()
+        (train_i_ind, test_i_ind), = ShuffleSplit(1,
+                           test_size=0.025,
+                           random_state=check_random_state(args['split_seed'])).split(feats_individ, None, None)
+        test_individ = feats_individ[test_i_ind]
+    else:
+        test_individ = None
+
     ## landmark data
     r['load']('~/github/libdems/turnout/turnout_ldmks_300_data.RData')
     turnout_ldmks = r.turnout_ldmks
@@ -285,7 +295,14 @@ if __name__ == '__main__':
         # whether we want to evaluate the variance as well (which we ignore)
         do_var = False
 
-        for name, ds in [('train', train), ('estop', estop), ('test', test)]:
+        pred_list = [('train', train), ('estop', estop), ('test', test)]
+
+        if args['pred_disagg']:
+            pred_list.append(('test_individ', test_individ))
+
+        print(pred_list)
+
+        for name, ds in pred_list:
             print()
             preds = eval_network(sess, net, ds
                                  , batch_pts=args['eval_batch_pts']
@@ -295,14 +312,15 @@ if __name__ == '__main__':
                 preds, preds_var = preds
                 d[name + '_preds_var'] = preds_var
 
-            d[name + '_y'] = y = ds.y
             d[name + '_preds'] = preds
 
-            d[name + '_mse'] = mse = mean_squared_error(y, preds)
-            print('{} MSE: {}'.format(name, mse))
+            if hasattr(ds, 'y'):
+                d[name + '_y'] = y = ds.y
+                d[name + '_mse'] = mse = mean_squared_error(y, preds)
+                print('{} MSE: {}'.format(name, mse))
 
-            d[name + '_r2'] = r2 = r2_score(y, preds)
-            print('{} R2: {}'.format(name, r2))
+                d[name + '_r2'] = r2 = r2_score(y, preds)
+                print('{} R2: {}'.format(name, r2))
 
             if do_var:
                 liks = stats.norm.pdf(y, preds, np.sqrt(preds_var))
@@ -314,4 +332,6 @@ if __name__ == '__main__':
                 d[name + '_coverage'] = coverage
                 print('{} coverage at 95%: {:.1%}'.format(name, coverage))
 
-    plot_results(d, save_file=args['out_dir'] + '_ploterror.png')
+    plot_agg_results(d, save_file=args['out_dir'] + '/ploterror.png')
+
+    pd.to_pickle(d, args['out_dir'] + '/net_params.pkl')
