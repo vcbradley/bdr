@@ -13,3 +13,4 @@ pew-experiment/results/sim_randparams_v2/*
 *.pyo
 *.xml
 .idea/workspace.xml
+checkpoints/
