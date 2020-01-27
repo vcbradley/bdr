@@ -28,8 +28,8 @@ def build_simple_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
                      outcome_type='binary'
                      ):
 
-    n_land = landmarks.shape[0]
-    net = Network(x_dim, n_land, dtype=dtype, y_dim = y_dim)
+    n_coef = landmarks.shape[0]
+    net = Network(x_dim, n_coef, dtype=dtype, y_dim = y_dim)
 
     inputs = net.inputs
     params = net.params
@@ -42,25 +42,20 @@ def build_simple_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
                                    trainable=True,  # we always want to train the bandwitdth param, not only when we're optimizing landmarks
                                    name = 'log_bw')
 
-    # set output dimensions
-    if outcome_type == 'categorical':
-        n_out = net.y_dim
-    else:
-        n_out = 1
 
     # initialize the outcome coefs with ridge regression (if we performed it) and randomly otherwise
     if init_out is None:
-        out = tf.random.normal([n_land, n_out], dtype=dtype)
+        out = tf.random.normal([n_coef, net.y_dim], dtype=dtype)
     else:
-        assert np.size(init_out) == n_land
-        out = tf.constant(np.resize(init_out, [n_land, n_out]), dtype=dtype)
+        assert np.size(init_out) == n_coef
+        out = tf.constant(np.resize(init_out, [n_coef, net.y_dim]), dtype=dtype)
     params['out'] = tf.Variable(out, name = 'out')
 
     # initialize the intercept weight randomly, or with ridge output if we have it
     if init_out_bias is None:
-        out_bias = tf.random.normal([n_out], dtype=dtype)
+        out_bias = tf.random.normal([net.y_dim], dtype=dtype)
     else:
-        out_bias = tf.constant(np.resize(init_out_bias, [n_out]), dtype=dtype)
+        out_bias = tf.constant(np.resize(init_out_bias, [net.y_dim]), dtype=dtype)
     params['out_bias'] = tf.Variable(out_bias, name = 'out_bias')
 
 
@@ -110,7 +105,7 @@ def build_spatsep_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
     # landmarks = args['landmarks']
     # x_dim = train.dim
     n_coef = landmarks.shape[0] * 2  # separate coefs for spatial landmarks and demo / scores
-    net = Network(x_dim, n_coef, dtype=dtype)
+    net = Network(x_dim, n_coef, dtype=dtype, y_dim = y_dim)
 
     inputs = net.inputs
     params = net.params
@@ -134,19 +129,20 @@ def build_spatsep_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
                                    trainable=True,
                                    name='log_bw_nonspat')
 
+
     # initialize the outcome coefs with ridge regression (if we performed it) and randomly otherwise
     if init_out is None:
-        out = tf.random.normal([n_coef, 1], dtype=dtype)
+        out = tf.random.normal([n_coef, net.y_dim], dtype=dtype)
     else:
         assert np.size(init_out) == n_coef
-        out = tf.constant(np.resize(init_out, [n_coef, 1]), dtype=dtype)
+        out = tf.constant(np.resize(init_out, [n_coef, net.y_dim]), dtype=dtype)
     params['out'] = tf.Variable(out, name = 'out')
 
     # initialize the intercept weight randomly, or with ridge output if we have it
     if init_out_bias is None:
-        out_bias = tf.random.normal([1], dtype=dtype)
+        out_bias = tf.random.normal([net.y_dim], dtype=dtype)
     else:
-        out_bias = tf.constant(init_out_bias, shape=(), dtype=dtype)
+        out_bias = tf.constant(np.resize(init_out_bias, [net.y_dim]), dtype=dtype)
     params['out_bias'] = tf.Variable(out_bias, name = 'out_bias')
 
 
