@@ -130,9 +130,10 @@ def train_network(sess, net, train_f, val_f, checkpoint_path,
 
 
 def eval_network(sess, net, test_f, batch_pts, batch_bags=np.inf, do_var=False):
-    preds = np.zeros_like(test_f.y)
+    preds = np.zeros((len(test_f), net.y_dim))
+
     if do_var:
-        pred_vars = np.zeros_like(test_f.y)
+        pred_vars = np.zeros((len(test_f), net.y_dim))
     i = 0
     for batch in loop_batches(test_f, max_pts=batch_pts, max_bags=batch_bags,
                               stack=True, shuffle=False):
