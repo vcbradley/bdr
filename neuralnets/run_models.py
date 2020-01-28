@@ -48,11 +48,14 @@ def get_parsed():
                          help = 'regularization coefficient for regression weights')
     parser.add_argument('--reg-out-bias', type=float, default=0,
                          help = 'regularization coefficient for regression intercept weight')
+    parser.add_argument('--reg-ell-weights', type=float, default=0,
+                        help='regularization coefficient for nonstat spatial kernel reg')
     parser.add_argument('--scale-reg-by-n', action='store_true', default=False)
     parser.add_argument('--init-from-ridge', action='store_true', default=False,
                          help = 'initialize coefficients from ridge regression')
     parser.add_argument('--dtype-double', action='store_true', default=False)
     parser.add_argument('--dtype-single', action='store_false', dest='dtype_double')
+    parser.add_argument('--feat-agg-type', default='concat')
 
     # data parameters
     parser.add_argument('--test-size', default=0.2)
@@ -140,6 +143,7 @@ def make_network(args, train):
         , 'scale_reg_by_n': args['scale_reg_by_n']
         , 'dtype': tf.float64 if args['dtype_double'] else tf.float32
         , 'outcome_type':args['outcome_type']
+          , 'feat_agg_type':args['feat_agg_type']
           }
 
     kw['bw'] = np.sqrt(get_median_sqdist(train) / 2)
