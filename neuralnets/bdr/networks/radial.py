@@ -306,5 +306,3 @@ def build_nonstat_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
     )
 
     return net
-
-

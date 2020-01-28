@@ -18,7 +18,7 @@ from sklearn.metrics import r2_score, mean_squared_error
 import tensorflow as tf
 
 from bdr.features import Features
-from bdr.networks.radial import build_simple_rbf, build_spatsep_rbf
+from bdr.networks.radial import build_simple_rbf, build_spatsep_rbf, build_nonstat_rbf
 from bdr.train import eval_network, train_network
 from bdr.utils import get_median_sqdist, tf_session
 
@@ -29,7 +29,7 @@ pandas2ri.activate()
 network_types = {
     'simple': build_simple_rbf,
     'spatial_sep': build_spatsep_rbf,
-    'nonstationary': build_nonstat_rbf,
+    'nonstationary': build_nonstat_rbf
 }
 
 
