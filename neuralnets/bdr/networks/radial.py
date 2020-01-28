@@ -25,13 +25,13 @@ def _rbf_kernel_nonstat(X, Y, log_ell_X, log_ell_Y):
 
         XY = tf.matmul(X, Y, transpose_b=True)
 
-        log_ell_X_col = np.expand_dims(log_ell_X, 1)
-        log_ell_Y_row = np.expand_dims(log_ell_Y, 0)
+        log_ell_X_col = tf.expand_dims(log_ell_X, 1)
+        log_ell_Y_row = tf.expand_dims(log_ell_Y, 0)
 
-        denom = np.exp(2 * log_ell_X_col) + np.exp(2 * log_ell_Y_row)
-        num = 2 * np.exp(log_ell_X_col) * np.exp(log_ell_Y_row)
+        denom = tf.exp(2 * log_ell_X_col) + tf.exp(2 * log_ell_Y_row)
+        num = 2 * tf.exp(log_ell_X_col) * tf.exp(log_ell_Y_row)
 
-        return np.sqrt(num / denom) * np.exp(-1 / denom * (-2 * XY + X_sqnorms_row + Y_sqnorms_col))
+        return tf.sqrt(num / denom) * tf.exp(-1 / denom * (-2 * XY + X_sqnorms_row + Y_sqnorms_col))
 
 
 def build_simple_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
