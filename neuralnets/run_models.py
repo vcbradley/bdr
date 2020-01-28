@@ -92,35 +92,40 @@ def _split_feats(args, feats, labels=None, groups=None):
 
     rs = check_random_state(args['split_seed'])
 
+    remaining_ind=np.arange(len(feats))
+
     test_splitter = ss(1,
                        train_size=args['test_size'],
                        random_state=rs)
-    (test_ind, train_estop_val_ind), = test_splitter.split(feats, None, None)
+    (i, j), = test_splitter.split(remaining_ind, None, None)
+    test_ind = remaining_ind[i]
+    remaining_ind = remaining_ind[j]
 
-    X_v = feats[train_estop_val_ind]
-    y_v = None if labels is None else labels[train_estop_val_ind]
-    g_v = None if groups is None else groups[train_estop_val_ind]
+    y_v = None if labels is None else labels[remaining_ind]
+    g_v = None if groups is None else groups[remaining_ind]
 
     if args['val_size'] is not None:
         val_splitter = ss(1,
                           train_size=args['val_size'],
                           random_state=rs)
-        (val_ind, train_estop_ind), = val_splitter.split(X_v, y_v, g_v)
-        val = X_v[val_ind]
+        (i, j), = val_splitter.split(remaining_ind, y_v, g_v)
+        val_ind = remaining_ind[i]
+        remaining_ind = remaining_ind[j]
     else:
-        val = None
-        train_estop_ind = list(range(0,len(train_estop_val_ind)))
-
+        val_ind = None
 
     estop_splitter = ss(1,
                         train_size=args['estop_size'],
                         random_state=rs)
-    X = X_v[train_estop_ind]
-    y = None if labels is None else y_v[train_estop_ind]
-    g = None if groups is None else g_v[train_estop_ind]
-    (estop_ind, train_ind), = estop_splitter.split(X, y, g)
 
-    return X[train_ind], X[estop_ind], val, feats[test_ind]
+    y = None if labels is None else y_v[remaining_ind]
+    g = None if groups is None else g_v[remaining_ind]
+    (i, j), = estop_splitter.split(remaining_ind, y, g)
+
+    estop_ind = remaining_ind[i]
+    train_ind = remaining_ind[j]
+
+    return train_ind, estop_ind, val_ind, test_ind
 
 def pick_landmarks(args, train):
     train.make_stacked()
@@ -261,17 +266,6 @@ if __name__ == '__main__':
     feats = Features(bags=X_all_array, copy=False, bare=False, y=outcome_data[args['outcome_name']])
     feats.make_stacked()
 
-    #individ feats
-    if args['pred_disagg']:
-        feats_individ = Features(bags=feats.stacked_features, n_pts = np.repeat(1,feats.total_points), copy=False, bare=False)
-        feats_individ.make_stacked()
-        (train_i_ind, test_i_ind), = ShuffleSplit(1,
-                           test_size=0.025,
-                           random_state=check_random_state(args['split_seed'])).split(feats_individ, None, None)
-        test_individ = feats_individ[test_i_ind]
-    else:
-        test_individ = None
-
     ## landmark data
     r['load']('~/github/libdems/turnout/turnout_ldmks_300_data.RData')
     turnout_ldmks = r.turnout_ldmks
@@ -281,7 +275,29 @@ if __name__ == '__main__':
     args['landmarks'] = feats.stacked_features[landmark_ind]
 
     # split data
-    train, estop, val, test = _split_feats(args, feats)
+    train_ind, estop_ind, val_ind, test_ind = _split_feats(args, feats)
+    train = None if train_ind is None else feats[train_ind]
+    estop = None if estop_ind is None else feats[estop_ind]
+    val = None if val_ind is None else feats[val_ind]
+    test = None if test_ind is None else feats[test_ind]
+    args['split_ind'] = {
+        'train' : train_ind,
+        'estop' : estop_ind,
+        'val':val_ind,
+        'test':test_ind
+    }
+
+    #individ feats
+    if args['pred_disagg']:
+        feats_individ = Features(bags=feats.stacked_features, n_pts = np.repeat(1,feats.total_points), copy=False, bare=False)
+        feats_individ.make_stacked()
+        (train_i_ind, test_i_ind), = ShuffleSplit(1,
+                           test_size=0.025,
+                           random_state=check_random_state(args['split_seed'])).split(feats_individ, None, None)
+        test_individ = feats_individ[test_i_ind]
+        args['split_ind']['test_individ'] = test_i_ind
+    else:
+        test_individ = None
 
     # build network
     net = make_network(args, train)
