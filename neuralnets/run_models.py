@@ -28,7 +28,8 @@ pandas2ri.activate()
 
 network_types = {
     'simple': build_simple_rbf,
-    'spatial_sep': build_spatsep_rbf
+    'spatial_sep': build_spatsep_rbf,
+    'nonstationary': build_nonstat_rbf,
 }
 
 
