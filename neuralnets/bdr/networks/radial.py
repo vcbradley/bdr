@@ -181,6 +181,8 @@ def build_spatsep_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
 
     if outcome_type == 'binary':
         net.output = tf.sigmoid(out_layer)
+    elif outcome_type == 'categorical':
+        net.output = tf.nn.softmax(out_layer)
     else:
         net.output = out_layer
 
@@ -292,6 +294,8 @@ def build_nonstat_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
 
     if outcome_type == 'binary':
         net.output = tf.sigmoid(out_layer)
+    elif outcome_type == 'categorical':
+        net.output = tf.nn.softmax(out_layer)
     else:
         net.output = out_layer
 
