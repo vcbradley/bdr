@@ -152,7 +152,7 @@ def make_network(args, train):
           , 'feat_agg_type':args['feat_agg_type']
           }
 
-    kw['bw'] = np.sqrt(get_median_sqdist(train) / 2)
+    kw['bw'] = np.sqrt(get_median_sqdist(train) / 2) * args['bw_scale']
 
     # get landmarks
     #kw['landmarks'] = landmarks = pick_landmarks(args, train)
