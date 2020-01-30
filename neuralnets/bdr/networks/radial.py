@@ -244,6 +244,7 @@ def build_nonstat_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
     params['ell_weights'] = tf.Variable(tf.random.normal([n_coef, 1], dtype=dtype),
                                         name='ell_weights',
                                         trainable=True)
+    print(params['ell_weights'])
 
     # initialize the outcome coefs with ridge regression (if we performed it) and randomly otherwise
     if init_out is None:
@@ -266,8 +267,8 @@ def build_nonstat_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
     K_ell_X = _rbf_kernel(inputs_spat, params['landmarks_spat'], params['log_bw_spat'])
     K_ell_ldmks = _rbf_kernel(params['landmarks_spat'], params['landmarks_spat'], params['log_bw_spat'])
 
-    log_ell_X = tf.squeeze(tf.math.log(tf.matmul(K_ell_X, params['ell_weights'])))
-    log_ell_ldmks = tf.squeeze(tf.math.log(tf.matmul(K_ell_ldmks, params['ell_weights'])))
+    log_ell_X = tf.squeeze(tf.matmul(K_ell_X, params['ell_weights']))
+    log_ell_ldmks = tf.squeeze(tf.matmul(K_ell_ldmks, params['ell_weights']))
 
     spat_kernel_layer = _rbf_kernel_nonstat(inputs_spat, params['landmarks_spat'], log_ell_X, log_ell_ldmks)
     nonspat_kernel_layer = _rbf_kernel(inputs_nonspat, params['landmarks_nonspat'], params['log_bw_nonspat'])
