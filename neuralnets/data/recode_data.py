@@ -76,7 +76,8 @@ def recode_covar_data():
     X_demo_scaled.columns = X_demo.columns
 
     # concatenate all demo columns
-    X_demo = pd.concat([dr_covars[['code_num', 'constituency']], X_demo_scaled], axis=1)
+    X_demo = pd.concat([dr_covars[['code_num', 'constituency', 'Westminster_Code']], X_demo_scaled], axis=1)
+    X_demo.rename(columns={'Westminster_Code': 'ons_id'}, inplace=True)
 
     # scale score columns
     X_scores = pd.DataFrame(prep.scale(dr_covars[score_cols]), index=dr_covars.index)
@@ -90,18 +91,16 @@ def recode_covar_data():
     X_scores.to_pickle(data_path + '/projection_data/X_scores.pkl')
     X_demo.to_pickle(data_path + '/projection_data/X_demo.pkl')
 
-    np.save(data_path + 'projection_data/X_all', X_all)
-    np.save(data_path + 'projection_data/var_cat', var_cat)
+    X_demo.insert(2, "constituency_lower", X_demo['constituency'].str.lower())
+    constit_code_tbl = X_demo.groupby(['code_num', 'constituency_lower', 'ons_id']).size().reset_index()
 
-    constit_code_tbl = X_demo
-    constit_code_tbl.insert(2, "constituency_lower", constit_code_tbl['constituency'].str.lower())
-    constit_code_tbl = constit_code_tbl.groupby(['code_num', 'constituency_lower']).size().reset_index()
+    constit_code_tbl.to_pickle(data_path + '/projection_data/constit_code_tbl.pkl')
 
     return constit_code_tbl
 
 
 def recode_outcome_data(constit_code_tbl):
-    data_path = '/Users/valeriebradley//Documents/LibDems/data/'
+    data_path = '/Users/valeriebradley/Documents/LibDems/data/'
 
     #############
     #### 2017 GE RESULTS
