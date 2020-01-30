@@ -187,12 +187,12 @@ def train_net(sess, args, net, train, val):
 
 
 def plot_agg_results(d, save_file = None):
-    y_dim = d['test_preds'].shape[1]
+    y_dim = d['preds'].shape[1]
 
     if y_dim > 1:
         x = np.linspace(0., 1., 100)
     else:
-        x = np.linspace(min(d['test_preds']), max(d['test_preds']), 100)
+        x = np.linspace(min(d['preds']), max(d['preds']), 100)
 
     c = np.ceil(np.sqrt(y_dim))
     r = np.ceil(y_dim / c)
@@ -217,8 +217,7 @@ def plot_agg_results(d, save_file = None):
         ax.plot(x, x, linestyle='--', color='black')
 
         # add points
-        ax.plot(d['train_y'][:,ind], d['train_preds'][:,ind], 'o', label='training set', alpha = 0.5)
-        ax.plot(d['test_y'][:,ind], d['test_preds'][:,ind], 'o', label='test set', alpha = 0.5)
+        ax.plot(d['y'][:,ind], d['preds'][:,ind], 'o', label='training set', alpha = 0.5)
 
         title = d['args']['outcome_name'][i-1]
         ax.set_title(title)
@@ -291,13 +290,8 @@ if __name__ == '__main__':
     if args['pred_disagg']:
         feats_individ = Features(bags=feats.stacked_features, n_pts = np.repeat(1,feats.total_points), copy=False, bare=False)
         feats_individ.make_stacked()
-        (train_i_ind, test_i_ind), = ShuffleSplit(1,
-                           test_size=0.025,
-                           random_state=check_random_state(args['split_seed'])).split(feats_individ, None, None)
-        test_individ = feats_individ[test_i_ind]
-        args['split_ind']['test_individ'] = test_i_ind
     else:
-        test_individ = None
+        feats_individ = None
 
     # build network
     net = make_network(args, train)
@@ -315,44 +309,53 @@ if __name__ == '__main__':
 
         # whether we want to evaluate the variance as well (which we ignore)
         do_var = False
+        # do all predictions
+        preds = eval_network(sess, net, feats
+                             , batch_pts=args['eval_batch_pts']
+                             , batch_bags=args['eval_batch_bags']
+                             , do_var=do_var)
+        d['y'] = feats.y
 
-        pred_list = [('train', train), ('estop', estop), ('test', test)]
+        if do_var:
+            preds, preds_var = preds
+            d['preds_var'] = preds_var
 
+        d['preds'] = preds
+
+        # individ predictions
         if args['pred_disagg']:
-            pred_list.append(('test_individ', test_individ))
-
-        print(pred_list)
-
-        for name, ds in pred_list:
-            print()
-            preds = eval_network(sess, net, ds
+            print("Predicting disaggregated observations")
+            preds_individ = eval_network(sess, net, feats_individ
                                  , batch_pts=args['eval_batch_pts']
                                  , batch_bags=args['eval_batch_bags']
                                  , do_var=do_var)
+            print('Done')
+
+
+        pred_list = ['train', 'estop', 'test']
+        for name in pred_list:
+
+            y = feats.y[args['split_ind'][name]]
+            y_hat = preds[args['split_ind'][name]]
+
+            d[name + '_mse'] = mse = mean_squared_error(y, y_hat)
+            print('{} MSE: {}'.format(name, mse))
+
+            d[name + '_r2'] = r2 = r2_score(y, y_hat)
+            print('{} R2: {}'.format(name, r2))
+
             if do_var:
-                preds, preds_var = preds
-                d[name + '_preds_var'] = preds_var
+                var_hat = preds_var[args['split_ind'][name]]
 
-            d[name + '_preds'] = preds
-
-            if hasattr(ds, 'y'):
-                d[name + '_y'] = y = ds.y
-                d[name + '_mse'] = mse = mean_squared_error(y, preds)
-                print('{} MSE: {}'.format(name, mse))
-
-                d[name + '_r2'] = r2 = r2_score(y, preds)
-                print('{} R2: {}'.format(name, r2))
-
-            if do_var:
-                liks = stats.norm.pdf(y, preds, np.sqrt(preds_var))
+                liks = stats.norm.pdf(y, y_hat, np.sqrt(var_hat))
                 d[name + '_nll'] = nll = -np.log(liks).mean()
                 print('{} NLL: {}'.format(name, nll))
 
-                cdfs = stats.norm.cdf(y, preds, np.sqrt(preds_var))
+                cdfs = stats.norm.cdf(y, preds, np.sqrt(var_hat))
                 coverage = np.mean((cdfs > .025) & (cdfs < .975))
                 d[name + '_coverage'] = coverage
                 print('{} coverage at 95%: {:.1%}'.format(name, coverage))
 
-    plot_agg_results(d, save_file=args['out_dir'] + '/ploterror.png')
+    #plot_agg_results(d, save_file=args['out_dir'] + '/ploterror.png')
 
     pd.to_pickle(d, args['out_dir'] + '/net_params.pkl')
