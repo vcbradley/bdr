@@ -217,7 +217,10 @@ def plot_agg_results(d, save_file = None):
         ax.plot(x, x, linestyle='--', color='black')
 
         # add points
-        ax.plot(d['y'][:,ind], d['preds'][:,ind], 'o', label='training set', alpha = 0.5)
+        train_ind = d['args']['split_ind']['train']
+        other_ind = [i for i in np.arange(d['preds'].shape[0]) if i not in train_ind]
+        ax.plot(d['y'][train_ind, ind], d['preds'][train_ind, ind], 'o', label='training set', alpha = 0.5)
+        ax.plot(d['y'][other_ind, ind], d['preds'][other_ind, ind], 'o', label='non-training set', alpha=0.5)
 
         title = d['args']['outcome_name'][i-1]
         ax.set_title(title)
@@ -356,6 +359,6 @@ if __name__ == '__main__':
                 d[name + '_coverage'] = coverage
                 print('{} coverage at 95%: {:.1%}'.format(name, coverage))
 
-    #plot_agg_results(d, save_file=args['out_dir'] + '/ploterror.png')
+    plot_agg_results(d, save_file=args['out_dir'] + '/ploterror.png')
 
     pd.to_pickle(d, args['out_dir'] + '/net_params.pkl')
