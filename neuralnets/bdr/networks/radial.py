@@ -246,7 +246,7 @@ def build_nonstat_rbf(x_dim, landmarks, bw, reg_out, y_dim = 1,
     params['ell_weights'] = tf.Variable(tf.random.normal([n_coef, 1], dtype=dtype),
                                         name='ell_weights',
                                         trainable=True)
-    params['ell_mu'] = tf.Variable(tf.constant(0, dtype=dtype),
+    params['ell_mu'] = tf.Variable(tf.constant(np.log(bw), dtype=dtype),
                                         name='ell_mu',
                                         trainable=True)
 
